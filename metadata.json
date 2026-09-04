@@ -1,0 +1,6 @@
+{
+  "name": "NutriVoice AI - Multimodal Calorie Tracker",
+  "description": "Tracker nutricional multimodal inteligente potenciado por Gemini: captura fotos de tus platos y describe con tu voz para un análisis de calorías, macros y puntaje personalizado.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
