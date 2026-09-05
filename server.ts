@@ -52,18 +52,18 @@ async function startServer() {
   });
 
   // 2. User Profile (Base Context)
-  app.get('/api/profile', (req, res) => {
+  app.get('/api/profile', async (req, res) => {
     try {
-      const user = getUser();
+      const user = await getUser();
       res.json(user);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Error al obtener perfil' });
     }
   });
 
-  app.post('/api/profile', (req, res) => {
+  app.post('/api/profile', async (req, res) => {
     try {
-      const updated = updateUser(req.body);
+      const updated = await updateUser(req.body);
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Error al actualizar perfil' });
@@ -71,10 +71,10 @@ async function startServer() {
   });
 
   // 3. Meals List
-  app.get('/api/meals', (req, res) => {
+  app.get('/api/meals', async (req, res) => {
     try {
       const date = req.query.date as string | undefined;
-      const meals = getMeals(date);
+      const meals = await getMeals(date);
       res.json(meals);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Error al obtener comidas' });
@@ -103,7 +103,7 @@ async function startServer() {
         });
       }
 
-      const user = getUser();
+      const user = await getUser();
 
       // Call Gemini 3.7 Flash multimodal
       const analysis = await analyzeMealWithGemini({
@@ -140,16 +140,16 @@ async function startServer() {
         createdAt: new Date().toISOString(),
       };
 
-      const savedMeal = addMeal(newMeal);
+      const savedMeal = await addMeal(newMeal);
 
       // Auto-update Daily Summary totals
-      const dayMeals = getMeals(date);
+      const dayMeals = await getMeals(date);
       const totalCal = dayMeals.reduce((acc, m) => acc + (m.calorias_estimadas || 0), 0);
       const totalP = dayMeals.reduce((acc, m) => acc + (m.macros?.proteinas || 0), 0);
       const totalC = dayMeals.reduce((acc, m) => acc + (m.macros?.carbohidratos || 0), 0);
       const totalF = dayMeals.reduce((acc, m) => acc + (m.macros?.grasas || 0), 0);
 
-      const existingSummary = getDailySummary(date);
+      const existingSummary = await getDailySummary(date);
       const updatedSummary: DailySummary = {
         date,
         userId: user.id,
@@ -169,7 +169,7 @@ async function startServer() {
         mealsCount: dayMeals.length,
         updatedAt: new Date().toISOString(),
       };
-      saveDailySummary(updatedSummary);
+      await saveDailySummary(updatedSummary);
 
       res.json({
         success: true,
@@ -185,10 +185,10 @@ async function startServer() {
   });
 
   // 5. Delete Meal
-  app.delete('/api/meals/:id', (req, res) => {
+  app.delete('/api/meals/:id', async (req, res) => {
     try {
       const id = req.params.id;
-      const success = deleteMeal(id);
+      const success = await deleteMeal(id);
       res.json({ success });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Error al eliminar comida' });
@@ -196,11 +196,11 @@ async function startServer() {
   });
 
   // 6. Get Daily Summary
-  app.get('/api/daily-summary', (req, res) => {
+  app.get('/api/daily-summary', async (req, res) => {
     try {
       const date = (req.query.date as string) || getTodayString();
-      const summary = getDailySummary(date);
-      const dayMeals = getMeals(date);
+      const summary = await getDailySummary(date);
+      const dayMeals = await getMeals(date);
 
       const totalCal = dayMeals.reduce((acc, m) => acc + (m.calorias_estimadas || 0), 0);
       const totalP = dayMeals.reduce((acc, m) => acc + (m.macros?.proteinas || 0), 0);
@@ -243,8 +243,8 @@ async function startServer() {
   app.post('/api/daily-summary/evaluate', async (req, res) => {
     try {
       const { date = getTodayString() } = req.body;
-      const user = getUser();
-      const meals = getMeals(date);
+      const user = await getUser();
+      const meals = await getMeals(date);
 
       const evaluation = await evaluateDailySummaryWithGemini(user, meals, date);
 
@@ -269,7 +269,7 @@ async function startServer() {
         updatedAt: new Date().toISOString(),
       };
 
-      saveDailySummary(updatedSummary);
+      await saveDailySummary(updatedSummary);
 
       res.json({
         success: true,
