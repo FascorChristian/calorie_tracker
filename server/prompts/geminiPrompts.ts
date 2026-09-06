@@ -1,4 +1,4 @@
-import { UserProfile, Meal } from '../src/types.js';
+import { UserProfile, Meal } from '../../shared/types.js';
 
 export const MEAL_ANALYSIS_SYSTEM_PROMPT = `Eres un Nutricionista Clínico y Dietista Deportivo de Élite con visión multimodal avanzada y capacidad de análisis auditivo nativo.
 Tu objetivo es analizar simultáneamente la FOTO de un plato de comida y la NOTA DE VOZ (audio) adjunta donde el usuario describe detalles clave de preparación, ingredientes ocultos, salsas, porciones o aderezos.
@@ -111,3 +111,4 @@ ${mealsList.length ? mealsList : 'No se registraron comidas en este día.'}
 
 Evalúa el día completo y genera el JSON estricto con: puntaje_diario (1-100), consejo_diario, balance_nutricional, puntos_fuertes (array de strings) y areas_de_mejora (array de strings).`;
 }
+

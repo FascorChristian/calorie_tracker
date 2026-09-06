@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Navbar } from './components/Navbar.js';
-import { DailyDashboard } from './components/DailyDashboard.js';
-import { UserProfileModal } from './components/UserProfileModal.js';
-import { MultimodalMealModal } from './components/MultimodalMealModal.js';
-import { MealDetailModal } from './components/MealDetailModal.js';
-import { PythonDeliverablesModal } from './components/PythonDeliverablesModal.js';
-import { UserProfile, Meal, DailySummary } from './types.js';
-import { Sparkles, Code2, HeartPulse, RefreshCw } from 'lucide-react';
+import {
+  Navbar,
+  DailyDashboard,
+  UserProfileModal,
+  MultimodalMealModal,
+  MealDetailModal,
+} from './components/index.js';
+import { UserProfile, Meal, DailySummary } from '../shared/types.js';
+import { api } from './services/api.js';
+import { Sparkles, RefreshCw } from 'lucide-react';
 
 function getTodayString(): string {
   const now = new Date();
@@ -28,7 +30,6 @@ export default function App() {
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
   const [isNewMealOpen, setIsNewMealOpen] = useState<boolean>(false);
   const [selectedMeal, setSelectedMeal] = useState<Meal | null>(null);
-  const [isPythonDocsOpen, setIsPythonDocsOpen] = useState<boolean>(false);
 
   // Toast / notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -52,9 +53,11 @@ export default function App() {
     setIsLoading(true);
     try {
       // 1. Fetch User Profile
-      const userRes = await fetch('/api/profile');
-      if (userRes.ok) {
-        const userData = await userRes.json();
+      const userData = await api.getProfile().catch((err) => {
+        console.error('Error fetching user profile:', err);
+        return null;
+      });
+      if (userData) {
         setUser(userData);
       }
 
@@ -69,20 +72,19 @@ export default function App() {
 
   const fetchDayData = async (date: string) => {
     try {
-      const [mealsRes, summaryRes] = await Promise.all([
-        fetch(`/api/meals?date=${date}`),
-        fetch(`/api/daily-summary?date=${date}`),
+      const [mealsData, summaryData] = await Promise.all([
+        api.getMeals(date).catch((err) => {
+          console.error('Error fetching meals:', err);
+          return [];
+        }),
+        api.getDailySummary(date).catch((err) => {
+          console.error('Error fetching summary:', err);
+          return null;
+        }),
       ]);
 
-      if (mealsRes.ok) {
-        const mealsData = await mealsRes.json();
-        setMeals(mealsData);
-      }
-
-      if (summaryRes.ok) {
-        const summaryData = await summaryRes.json();
-        setDailySummary(summaryData);
-      }
+      setMeals(mealsData);
+      setDailySummary(summaryData);
     } catch (err) {
       console.error('Error fetching day data:', err);
     }
@@ -90,21 +92,14 @@ export default function App() {
 
   const handleSaveProfile = async (updated: Partial<UserProfile>) => {
     try {
-      const res = await fetch('/api/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-      });
-      if (res.ok) {
-        const saved = await res.json();
-        setUser(saved);
-        showToast('¡Perfil biométrico actualizado exitosamente!');
-        // Refresh summary with new goals
-        fetchDayData(currentDate);
-      }
-    } catch (err) {
+      const saved = await api.updateProfile(updated);
+      setUser(saved);
+      showToast('¡Perfil biométrico actualizado exitosamente!');
+      // Refresh summary with new goals
+      fetchDayData(currentDate);
+    } catch (err: any) {
       console.error('Error updating profile:', err);
-      showToast('Error al guardar el perfil');
+      showToast(err.message || 'Error al guardar el perfil');
     }
   };
 
@@ -116,33 +111,27 @@ export default function App() {
 
   const handleDeleteMeal = async (mealId: string) => {
     try {
-      const res = await fetch(`/api/meals/${mealId}`, { method: 'DELETE' });
-      if (res.ok) {
+      const success = await api.deleteMeal(mealId);
+      if (success) {
         setMeals((prev) => prev.filter((m) => m.id !== mealId));
         fetchDayData(currentDate);
         showToast('Plato eliminado.');
       }
     } catch (err) {
       console.error('Error deleting meal:', err);
+      showToast('Error al eliminar comida');
     }
   };
 
   const handleRecalculateScore = async () => {
     setIsEvaluatingScore(true);
     try {
-      const res = await fetch('/api/daily-summary/evaluate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: currentDate }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDailySummary(data.summary);
-        showToast(`¡Puntaje Diario calculado: ${data.summary.puntaje_diario}/100!`);
-      }
-    } catch (err) {
+      const data = await api.evaluateDailySummary(currentDate);
+      setDailySummary(data.summary);
+      showToast(`¡Puntaje Diario calculado: ${data.summary.puntaje_diario}/100!`);
+    } catch (err: any) {
       console.error('Error evaluating daily score:', err);
-      showToast('Error al evaluar el día con Gemini');
+      showToast(err.message || 'Error al evaluar el día con Gemini');
     } finally {
       setIsEvaluatingScore(false);
     }
@@ -165,7 +154,6 @@ export default function App() {
         user={user}
         onOpenProfile={() => setIsProfileOpen(true)}
         onOpenNewMeal={() => setIsNewMealOpen(true)}
-        onOpenPythonDocs={() => setIsPythonDocsOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -191,22 +179,15 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer info & Deliverables Banner */}
+      {/* Footer info */}
       <footer className="border-t border-stone-800/80 bg-stone-950 py-6 px-4">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-stone-500">
           <div className="flex items-center gap-2">
             <span className="font-bold text-stone-400">NutriVoice AI</span>
             <span>•</span>
-            <span>Tracker Calórico Multimodal (React + Python FastAPI + Gemini 3.7)</span>
+            <span>Tracker Calórico Multimodal Inteligente (Gemini 3.7 Flash)</span>
           </div>
-
-          <button
-            onClick={() => setIsPythonDocsOpen(true)}
-            className="flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 font-semibold transition-colors"
-          >
-            <Code2 className="w-4 h-4" />
-            <span>Ver Modelos SQLAlchemy, Código FastAPI y System Prompts</span>
-          </button>
+          <span className="text-stone-600">Registro por Foto & Voz • IA Nutricional</span>
         </div>
       </footer>
 
@@ -229,11 +210,6 @@ export default function App() {
         meal={selectedMeal}
         onClose={() => setSelectedMeal(null)}
         onDelete={handleDeleteMeal}
-      />
-
-      <PythonDeliverablesModal
-        isOpen={isPythonDocsOpen}
-        onClose={() => setIsPythonDocsOpen(false)}
       />
     </div>
   );

@@ -1,21 +1,7 @@
 import mysql from 'mysql2/promise';
-import dotenv from 'dotenv';
-import { UserProfile, Meal, DailySummary } from '../src/types.js';
-
-dotenv.config();
-
-// Crear el Pool de conexiones a MySQL
-export const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'calorie_tracker',
-  port: Number(process.env.DB_PORT) || 3306,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  dateStrings: true, // Para recibir las fechas como string 'YYYY-MM-DD' sin conversiones UTC
-});
+import { pool } from '../config/db.js';
+import { formatToMysqlDateTime } from '../utils/dateUtils.js';
+import { UserProfile, Meal, DailySummary } from '../../shared/types.js';
 
 // Helper para parsear campos JSON que puedan venir como string o ya parseados
 function safeJsonParse<T>(val: any, fallback: T): T {
@@ -63,39 +49,54 @@ export async function getUser(userId: string = 'user_default'): Promise<UserProf
 
 // 2. Actualizar perfil de usuario
 export async function updateUser(
-  updatedUser: Partial<UserProfile>,
+  user: Partial<UserProfile>,
   userId: string = 'user_default'
 ): Promise<UserProfile> {
-  const fields: string[] = [];
-  const values: any[] = [];
+  const current = await getUser(userId);
+  const updated: UserProfile = { ...current, ...user };
 
-  if (updatedUser.name !== undefined) { fields.push('name = ?'); values.push(updatedUser.name); }
-  if (updatedUser.age !== undefined) { fields.push('age = ?'); values.push(updatedUser.age); }
-  if (updatedUser.gender !== undefined) { fields.push('gender = ?'); values.push(updatedUser.gender); }
-  if (updatedUser.weightKg !== undefined) { fields.push('weight_kg = ?'); values.push(updatedUser.weightKg); }
-  if (updatedUser.heightCm !== undefined) { fields.push('height_cm = ?'); values.push(updatedUser.heightCm); }
-  if (updatedUser.activityLevel !== undefined) { fields.push('activity_level = ?'); values.push(updatedUser.activityLevel); }
-  if (updatedUser.goal !== undefined) { fields.push('goal = ?'); values.push(updatedUser.goal); }
-  if (updatedUser.targetCalories !== undefined) { fields.push('target_calories = ?'); values.push(updatedUser.targetCalories); }
-  if (updatedUser.targetProteinG !== undefined) { fields.push('target_protein_g = ?'); values.push(updatedUser.targetProteinG); }
-  if (updatedUser.targetCarbsG !== undefined) { fields.push('target_carbs_g = ?'); values.push(updatedUser.targetCarbsG); }
-  if (updatedUser.targetFatG !== undefined) { fields.push('target_fat_g = ?'); values.push(updatedUser.targetFatG); }
-  if (updatedUser.allergies !== undefined) { fields.push('allergies = ?'); values.push(JSON.stringify(updatedUser.allergies)); }
-  if (updatedUser.dietaryPreferences !== undefined) { fields.push('dietary_preferences = ?'); values.push(JSON.stringify(updatedUser.dietaryPreferences)); }
-  if (updatedUser.notes !== undefined) { fields.push('notes = ?'); values.push(updatedUser.notes); }
+  const query = `
+    UPDATE users SET
+      name = ?,
+      age = ?,
+      gender = ?,
+      weight_kg = ?,
+      height_cm = ?,
+      activity_level = ?,
+      goal = ?,
+      target_calories = ?,
+      target_protein_g = ?,
+      target_carbs_g = ?,
+      target_fat_g = ?,
+      allergies = ?,
+      dietary_preferences = ?,
+      notes = ?,
+      updated_at = NOW()
+    WHERE id = ?
+  `;
 
-  if (fields.length > 0) {
-    values.push(userId);
-    await pool.execute(
-      `UPDATE users SET ${fields.join(', ')} WHERE id = ?`,
-      values
-    );
-  }
+  await pool.execute(query, [
+    updated.name,
+    updated.age,
+    updated.gender,
+    updated.weightKg,
+    updated.heightCm,
+    updated.activityLevel,
+    updated.goal,
+    updated.targetCalories,
+    updated.targetProteinG,
+    updated.targetCarbsG,
+    updated.targetFatG,
+    JSON.stringify(updated.allergies || []),
+    JSON.stringify(updated.dietaryPreferences || []),
+    updated.notes || null,
+    userId,
+  ]);
 
-  return await getUser(userId);
+  return getUser(userId);
 }
 
-// 3. Obtener comidas (filtradas opcionalmente por fecha)
+// 3. Obtener lista de comidas (opcionalmente filtrado por fecha)
 export async function getMeals(
   date?: string,
   userId: string = 'user_default'
@@ -140,6 +141,8 @@ export async function getMeals(
 
 // 4. Agregar nueva comida
 export async function addMeal(meal: Meal): Promise<Meal> {
+  const formattedCreatedAt = formatToMysqlDateTime(meal.createdAt);
+
   const query = `
     INSERT INTO meals (
       id, user_id, meal_date, meal_time, meal_type,
@@ -169,10 +172,13 @@ export async function addMeal(meal: Meal): Promise<Meal> {
     meal.feedback_breve,
     JSON.stringify(meal.ingredientes_detectados || []),
     meal.detalles_audio || null,
-    meal.createdAt || new Date().toISOString(),
+    formattedCreatedAt,
   ]);
 
-  return meal;
+  return {
+    ...meal,
+    createdAt: formattedCreatedAt,
+  };
 }
 
 // 5. Eliminar comida por ID
@@ -259,3 +265,4 @@ export async function saveDailySummary(
 
   return summary;
 }
+

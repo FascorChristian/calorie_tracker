@@ -12,8 +12,8 @@ import {
   Check,
   Flame,
 } from 'lucide-react';
-import { UserProfile } from '../types.js';
-import { calculateRecommendedTargets, calculateBMR, calculateTDEE } from '../utils/nutritionCalculators.js';
+import { UserProfile } from '../../../shared/types.js';
+import { calculateRecommendedTargets, calculateBMR, calculateTDEE } from '../../utils/nutritionCalculators.js';
 
 interface UserProfileModalProps {
   isOpen: boolean;

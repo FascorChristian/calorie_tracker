@@ -15,7 +15,7 @@ import {
   Zap,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Meal, DailySummary, UserProfile } from '../types.js';
+import { Meal, DailySummary, UserProfile } from '../../../shared/types.js';
 
 interface DailyDashboardProps {
   currentDate: string;

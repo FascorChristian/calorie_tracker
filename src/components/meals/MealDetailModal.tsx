@@ -10,7 +10,7 @@ import {
   Clock,
   Calendar,
 } from 'lucide-react';
-import { Meal } from '../types.js';
+import { Meal } from '../../../shared/types.js';
 
 interface MealDetailModalProps {
   meal: Meal | null;
@@ -142,16 +142,34 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({
             </p>
           </div>
 
-          {/* Voice note transcript / details */}
-          {meal.detalles_audio && (
-            <div className="p-4 rounded-2xl bg-stone-950 border border-stone-800 space-y-1.5">
-              <div className="flex items-center gap-2 text-xs font-bold text-stone-300">
-                <Volume2 className="w-4 h-4 text-emerald-400" />
-                <span>Detalles Extraídos de la Nota de Voz</span>
+          {/* Voice note audio player and/or transcript */}
+          {(meal.audioDataUrl || meal.detalles_audio) && (
+            <div className="p-4 rounded-2xl bg-stone-950 border border-stone-800 space-y-2.5">
+              <div className="flex items-center justify-between text-xs font-bold text-stone-300">
+                <span className="flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-emerald-400" />
+                  Nota de Voz Grabada
+                </span>
+                {meal.audioDurationSeconds ? (
+                  <span className="text-[11px] text-stone-500 font-mono">
+                    {meal.audioDurationSeconds}s
+                  </span>
+                ) : null}
               </div>
-              <p className="text-xs text-stone-400 italic">
-                "{meal.detalles_audio}"
-              </p>
+
+              {meal.audioDataUrl && (
+                <audio
+                  src={meal.audioDataUrl}
+                  controls
+                  className="w-full h-8 accent-emerald-500"
+                />
+              )}
+
+              {meal.detalles_audio && (
+                <p className="text-xs text-stone-400 italic">
+                  "{meal.detalles_audio}"
+                </p>
+              )}
             </div>
           )}
 

@@ -4,13 +4,11 @@ import {
   Camera,
   Mic,
   User,
-  Code2,
   Calendar,
   ChevronLeft,
   ChevronRight,
-  Flame,
 } from 'lucide-react';
-import { UserProfile } from '../types.js';
+import { UserProfile } from '../../../shared/types.js';
 
 interface NavbarProps {
   currentDate: string;
@@ -18,7 +16,6 @@ interface NavbarProps {
   user: UserProfile | null;
   onOpenProfile: () => void;
   onOpenNewMeal: () => void;
-  onOpenPythonDocs: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -27,7 +24,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   user,
   onOpenProfile,
   onOpenNewMeal,
-  onOpenPythonDocs,
 }) => {
   const getTodayString = () => {
     const now = new Date();
@@ -96,13 +92,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Quick Action on Mobile */}
           <div className="flex items-center gap-1.5 sm:hidden">
             <button
-              onClick={onOpenPythonDocs}
-              className="p-2 rounded-lg bg-stone-900 border border-stone-700 text-stone-300 hover:text-emerald-400 text-xs"
-              title="Ver código Python y Prompts"
-            >
-              <Code2 className="w-4 h-4" />
-            </button>
-            <button
               onClick={onOpenProfile}
               className="p-2 rounded-lg bg-stone-900 border border-stone-700 text-stone-300 hover:text-emerald-400 text-xs"
               title="Perfil"
@@ -148,15 +137,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right: Actions (Desktop) */}
         <div className="hidden sm:flex items-center gap-2.5">
-          {/* Deliverables Code Modal */}
-          <button
-            onClick={onOpenPythonDocs}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-stone-900/90 hover:bg-stone-800 border border-stone-700/80 text-xs font-semibold text-stone-300 hover:text-emerald-400 transition-all shadow-sm group"
-          >
-            <Code2 className="w-4 h-4 text-emerald-400 group-hover:rotate-12 transition-transform" />
-            <span>Código Python & Prompts</span>
-          </button>
-
           {/* User Profile */}
           <button
             onClick={onOpenProfile}
@@ -189,3 +169,4 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
+

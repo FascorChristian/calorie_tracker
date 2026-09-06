@@ -7,17 +7,12 @@ import {
   RefreshCw,
   Sparkles,
   Upload,
-  Play,
-  Pause,
   Trash2,
   CheckCircle2,
   AlertCircle,
-  Volume2,
-  Flame,
-  Utensils,
-  Lightbulb,
+  Play,
 } from 'lucide-react';
-import { Meal, UserProfile, MultimodalAnalysisRequest } from '../types.js';
+import { Meal, UserProfile } from '../../../shared/types.js';
 
 interface MultimodalMealModalProps {
   isOpen: boolean;
@@ -26,26 +21,49 @@ interface MultimodalMealModalProps {
   onMealCreated: (newMeal: Meal) => void;
 }
 
-const SAMPLE_MEALS = [
-  {
-    title: 'Bowl de Pollo, Arroz y Aguacate',
-    image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80',
-    audioText: 'Es pechuga de pollo a la plancha (unos 180g), con 1 taza de arroz jazmín y medio aguacate. Usé 1 cucharada de aceite de oliva para saltear el pollo.',
-    mealType: 'almuerzo' as const,
-  },
-  {
-    title: 'Pancakes de Avena y Proteína con Frutos Rojos',
-    image: 'https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?auto=format&fit=crop&w=600&q=80',
-    audioText: 'Son 3 pancakes hechos con 50g de avena molida, 1 scoop de proteína de suero y 2 claras de huevo. Encima tienen 50g de arándanos y 1 cucharada de miel cruda.',
-    mealType: 'desayuno' as const,
-  },
-  {
-    title: 'Tacos de Bistec con Guacamole y Salsa',
-    image: 'https://images.unsplash.com/photo-1551504734-5ee1c4a1479b?auto=format&fit=crop&w=600&q=80',
-    audioText: 'Comí 3 tacos de bistec de res en tortilla de maíz. Tienen cebolla, cilantro, unas 2 cucharadas de guacamole y salsa roja sin aceite añadido.',
-    mealType: 'cena' as const,
-  },
-];
+// Convert an AudioBuffer to standard 16-bit PCM WAV Blob (Mono for voice recordings)
+function audioBufferToWav(buffer: AudioBuffer): Blob {
+  const numChannels = 1;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // PCM
+  const bitDepth = 16;
+  const result = buffer.getChannelData(0);
+
+  const bytesPerSample = bitDepth / 8;
+  const blockAlign = numChannels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = result.length * bytesPerSample;
+  const bufferSize = 44 + dataSize;
+  const arrayBuffer = new ArrayBuffer(bufferSize);
+  const view = new DataView(arrayBuffer);
+
+  // "RIFF" chunk descriptor
+  view.setUint32(0, 0x52494646, false);
+  view.setUint32(4, 36 + dataSize, true);
+  // "WAVE" format
+  view.setUint32(8, 0x57415645, false);
+  // "fmt " sub-chunk
+  view.setUint32(12, 0x666d7420, false);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
+  // "data" sub-chunk
+  view.setUint32(36, 0x64617461, false);
+  view.setUint32(40, dataSize, true);
+
+  let offset = 44;
+  for (let i = 0; i < result.length; i++) {
+    const s = Math.max(-1, Math.min(1, result[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([view], { type: 'audio/wav' });
+}
 
 export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   isOpen,
@@ -66,6 +84,7 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioDuration, setAudioDuration] = useState(0);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [audioWarning, setAudioWarning] = useState<string | null>(null);
 
   // Analysis State
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -74,7 +93,6 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
 
   // Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const visualizerCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -84,21 +102,71 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const isStartingAudioRef = useRef<boolean>(false);
+
+  // Direct Web Audio API playback refs
+  const decodedAudioBufferRef = useRef<AudioBuffer | null>(null);
+  const playbackCtxRef = useRef<AudioContext | null>(null);
+  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
       stopCamera();
       stopRecording();
+      discardAudio();
       resetForm();
     }
   }, [isOpen]);
 
-  const resetForm = () => {
-    setImageSrc(null);
+  useEffect(() => {
+    return () => {
+      stopCamera();
+      stopRecording();
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+      if (playbackCtxRef.current && playbackCtxRef.current.state !== 'closed') {
+        playbackCtxRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (cameraActive && mediaStreamRef.current && videoRef.current) {
+      videoRef.current.srcObject = mediaStreamRef.current;
+      videoRef.current.play().catch((err) => {
+        console.error('Error al reproducir el video de la cámara:', err);
+      });
+    }
+  }, [cameraActive]);
+
+  const discardAudio = () => {
+    stopRecording();
+    if (activeSourceRef.current) {
+      try {
+        activeSourceRef.current.stop();
+      } catch {}
+      activeSourceRef.current = null;
+    }
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.currentTime = 0;
+    }
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+    }
+    decodedAudioBufferRef.current = null;
+    setIsPlayingAudio(false);
     setAudioBlob(null);
     setAudioBase64(null);
     setAudioUrl(null);
     setAudioDuration(0);
+    setAudioWarning(null);
+  };
+
+  const resetForm = () => {
+    setImageSrc(null);
+    discardAudio();
     setTextNotes('');
     setErrorMessage(null);
     setIsAnalyzing(false);
@@ -110,15 +178,19 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   const startCamera = async () => {
     try {
       setErrorMessage(null);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      });
-      mediaStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
       }
+      mediaStreamRef.current = stream;
       setCameraActive(true);
     } catch (err: any) {
       console.error('Error starting camera:', err);
@@ -167,13 +239,37 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   // AUDIO & WEB AUDIO API HANDLING
   // ==========================================
   const startRecording = async () => {
+    if (isStartingAudioRef.current) return;
+    isStartingAudioRef.current = true;
+
     try {
       setErrorMessage(null);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setAudioWarning(null);
+
+      // Clean up previous audio state, active playback and timers
+      discardAudio();
+
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {}
+      }
+
+      // Request microphone stream with voice enhancements
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
 
       // Setup Web Audio API Analyser for Live Waveform
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       const audioCtx = new AudioCtx();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 64;
       const source = audioCtx.createMediaStreamSource(stream);
@@ -184,70 +280,219 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
 
       drawWaveform();
 
-      // Setup MediaRecorder
-      let mimeType = 'audio/webm';
-      if (!MediaRecorder.isTypeSupported('audio/webm')) {
-        if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4';
-        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
-          mimeType = 'audio/ogg';
-        }
+      // Determine supported MIME type
+      let mimeType = '';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+        mimeType = 'audio/ogg';
       }
 
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
 
-      mediaRecorder.onstop = () => {
-        const fullBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        setAudioBlob(fullBlob);
-        const u = URL.createObjectURL(fullBlob);
-        setAudioUrl(u);
+      mediaRecorder.onstop = async () => {
+        const rawType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+        const cleanType = rawType.split(';')[0];
+        const fullBlob = new Blob(audioChunksRef.current, { type: cleanType });
 
-        // Convert blob to base64
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setAudioBase64(reader.result as string);
-        };
-        reader.readAsDataURL(fullBlob);
+        try {
+          const arrayBuffer = await fullBlob.arrayBuffer();
+          const decodeCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const audioBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
 
-        // Stop tracks
+          // Save decoded buffer for direct Web Audio hardware playback
+          decodedAudioBufferRef.current = audioBuffer;
+
+          // Check amplitude across audio samples to warn if mic was muted in Windows
+          let maxAmp = 0;
+          const channelData = audioBuffer.getChannelData(0);
+          for (let i = 0; i < channelData.length; i++) {
+            const val = Math.abs(channelData[i]);
+            if (val > maxAmp) maxAmp = val;
+          }
+
+          if (maxAmp < 0.008) {
+            setAudioWarning('El micrófono grabó casi en silencio. Revisa el volumen o activación de tu micrófono en Windows.');
+          } else {
+            setAudioWarning(null);
+          }
+
+          // Convert to standard 16-bit PCM WAV (universally playable in all browsers)
+          const wavBlob = audioBufferToWav(audioBuffer);
+          setAudioBlob(wavBlob);
+          const u = URL.createObjectURL(wavBlob);
+          setAudioUrl(u);
+
+          if (audioBuffer.duration && audioBuffer.duration > 0) {
+            setAudioDuration(Math.max(1, Math.round(audioBuffer.duration)));
+          }
+
+          // Convert to Base64 for Gemini & backend
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setAudioBase64(reader.result as string);
+          };
+          reader.readAsDataURL(wavBlob);
+
+          decodeCtx.close().catch(() => {});
+        } catch (decodeErr) {
+          console.warn('Audio decoding fallback to raw blob:', decodeErr);
+          setAudioBlob(fullBlob);
+          const u = URL.createObjectURL(fullBlob);
+          setAudioUrl(u);
+
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setAudioBase64(reader.result as string);
+          };
+          reader.readAsDataURL(fullBlob);
+        }
+
+        // Stop media stream tracks
         stream.getTracks().forEach((track) => track.stop());
         if (audioCtx.state !== 'closed') {
-          audioCtx.close();
+          audioCtx.close().catch(() => {});
         }
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
         }
       };
 
-      mediaRecorder.start(100);
+      // Start recording without timeslice so container isn't fragmented
+      mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
       setIsRecording(true);
-      setAudioDuration(0);
 
-      // Start duration counter
+      // Start duration counter safely
+      const startTime = Date.now();
       timerRef.current = setInterval(() => {
-        setAudioDuration((prev) => prev + 1);
-      }, 1000);
+        const elapsed = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+        setAudioDuration(elapsed);
+      }, 500);
     } catch (err: any) {
       console.error('Error starting audio recording:', err);
-      setErrorMessage('Permiso de micrófono denegado. Puedes escribir detalles en el campo de texto.');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+      setErrorMessage('No se pudo acceder al micrófono. Por favor verifica los permisos en el navegador.');
       setIsRecording(false);
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+    } finally {
+      isStartingAudioRef.current = false;
+    }
+  };
+
+  const stopRecording = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (err) {
+        console.warn('Error stopping media recorder:', err);
+      }
+    }
+    setIsRecording(false);
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      await startRecording();
+    }
+  };
+
+  const playAudio = async () => {
+    if (isPlayingAudio) {
+      if (activeSourceRef.current) {
+        try {
+          activeSourceRef.current.stop();
+        } catch {}
+        activeSourceRef.current = null;
+      }
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+        audioElementRef.current.currentTime = 0;
+      }
+      setIsPlayingAudio(false);
+      return;
+    }
+
+    // 1. Direct Web Audio API playback from decoded buffer (hardware direct, no browser container bug)
+    if (decodedAudioBufferRef.current) {
+      try {
+        if (!playbackCtxRef.current || playbackCtxRef.current.state === 'closed') {
+          playbackCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
+        const ctx = playbackCtxRef.current;
+        if (ctx.state === 'suspended') {
+          await ctx.resume();
+        }
+
+        if (activeSourceRef.current) {
+          try { activeSourceRef.current.stop(); } catch {}
+          activeSourceRef.current = null;
+        }
+
+        if (audioElementRef.current) {
+          audioElementRef.current.pause();
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = decodedAudioBufferRef.current;
+
+        const gain = ctx.createGain();
+        gain.gain.value = 1.0;
+        source.connect(gain);
+        gain.connect(ctx.destination);
+
+        source.onended = () => {
+          setIsPlayingAudio(false);
+          activeSourceRef.current = null;
+        };
+
+        activeSourceRef.current = source;
+        source.start(0);
+        setIsPlayingAudio(true);
+        return;
+      } catch (err) {
+        console.warn('Web Audio direct playback failed, falling back to HTMLAudioElement:', err);
+      }
+    }
+
+    // 2. Fallback to HTML Audio Element with WAV URL
+    if (audioUrl) {
+      try {
+        if (audioElementRef.current) {
+          audioElementRef.current.currentTime = 0;
+          await audioElementRef.current.play();
+          setIsPlayingAudio(true);
+        }
+      } catch (err) {
+        console.error('HTMLAudioElement play failed:', err);
+        setErrorMessage('No se pudo reproducir el audio. Verifica tu dispositivo de salida de sonido.');
+        setIsPlayingAudio(false);
       }
     }
   };
@@ -264,6 +509,7 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
     const dataArray = new Uint8Array(bufferLength);
 
     const render = () => {
+      if (!analyserRef.current) return;
       animationFrameRef.current = requestAnimationFrame(render);
       analyser.getByteFrequencyData(dataArray);
 
@@ -283,29 +529,6 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
       }
     };
     render();
-  };
-
-  const togglePlayAudio = () => {
-    if (!audioUrl) return;
-    if (!audioElementRef.current) {
-      audioElementRef.current = new Audio(audioUrl);
-      audioElementRef.current.onended = () => setIsPlayingAudio(false);
-    }
-
-    if (isPlayingAudio) {
-      audioElementRef.current.pause();
-      setIsPlayingAudio(false);
-    } else {
-      audioElementRef.current.play();
-      setIsPlayingAudio(true);
-    }
-  };
-
-  const handleSelectSample = (sample: typeof SAMPLE_MEALS[0]) => {
-    setImageSrc(sample.image);
-    setTextNotes(sample.audioText);
-    setMealType(sample.mealType);
-    stopCamera();
   };
 
   // ==========================================
@@ -342,7 +565,7 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
           imageBase64: imageSrc || undefined,
           imageMimeType: 'image/jpeg',
           audioBase64: audioBase64 || undefined,
-          audioMimeType: audioBlob?.type || 'audio/webm',
+          audioMimeType: audioBlob?.type || 'audio/wav',
           audioTranscript: textNotes || undefined,
           audioDurationSeconds: audioDuration,
           mealType: mealType,
@@ -464,7 +687,13 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
             ) : cameraActive ? (
               <div className="relative rounded-2xl overflow-hidden border border-emerald-500/40 bg-black aspect-[4/3] sm:aspect-video flex items-center justify-center">
                 <video
-                  ref={videoRef}
+                  ref={(el) => {
+                    videoRef.current = el;
+                    if (el && mediaStreamRef.current && el.srcObject !== mediaStreamRef.current) {
+                      el.srcObject = mediaStreamRef.current;
+                      el.play().catch(() => {});
+                    }
+                  }}
                   autoPlay
                   playsInline
                   muted
@@ -529,11 +758,11 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
           </div>
 
           {/* Voice Note & Web Audio API Section */}
-          <div className="space-y-2 bg-stone-950/70 p-4 rounded-2xl border border-stone-800/90">
+          <div className="space-y-3 bg-stone-950/70 p-4 rounded-2xl border border-stone-800/90">
             <div className="flex items-center justify-between text-xs font-bold text-stone-300">
               <span className="flex items-center gap-1.5">
                 <Mic className="w-4 h-4 text-emerald-400" />
-                2. Nota de Voz Nativa (Ingredientes Ocultos & Porciones)
+                2. Nota de Voz
               </span>
               {isRecording && (
                 <span className="text-rose-400 text-xs font-mono animate-pulse flex items-center gap-1">
@@ -541,10 +770,6 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
                 </span>
               )}
             </div>
-
-            <p className="text-[11px] text-stone-400">
-              Menciona aceites utilizados, mantequilla, salsas, azúcar o aderezos que no se ven a simple vista.
-            </p>
 
             {/* Live Visualizer Canvas when recording */}
             {isRecording && (
@@ -559,149 +784,115 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
             )}
 
             {/* Audio Recording Controls */}
-            <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-1">
-              {/* Push-to-Talk or Click-to-record Button */}
-              <button
-                type="button"
-                onMouseDown={() => {
-                  if (!isRecording) startRecording();
-                }}
-                onMouseUp={() => {
-                  if (isRecording) stopRecording();
-                }}
-                onTouchStart={() => {
-                  if (!isRecording) startRecording();
-                }}
-                onTouchEnd={() => {
-                  if (isRecording) stopRecording();
-                }}
-                onClick={() => {
-                  // Fallback for click toggle
-                  if (isRecording) {
-                    stopRecording();
-                  } else if (!audioBlob) {
-                    startRecording();
-                  }
-                }}
-                className={`w-full sm:flex-1 py-3 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all select-none ${
-                  isRecording
-                    ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-500/30 scale-[0.98]'
-                    : 'bg-stone-800 hover:bg-stone-750 text-stone-200 border border-stone-700'
-                }`}
-              >
-                <Mic className={`w-4 h-4 ${isRecording ? 'text-white' : 'text-emerald-400'}`} />
-                {isRecording
-                  ? '¡Soltar para finalizar grabación!'
-                  : 'Mantener presionado para hablar (o clic)'}
-              </button>
+            <div className="space-y-2.5">
+              <div className="flex flex-col sm:flex-row items-center gap-2.5">
+                {/* Click to Record / Click to Stop Button */}
+                <button
+                  type="button"
+                  onClick={toggleRecording}
+                  className={`w-full sm:flex-1 py-3 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all select-none cursor-pointer ${
+                    isRecording
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse shadow-lg shadow-rose-600/40'
+                      : audioBlob
+                      ? 'bg-stone-800 hover:bg-stone-750 text-stone-300 border border-stone-700'
+                      : 'bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-300 border border-emerald-500/30'
+                  }`}
+                >
+                  {isRecording ? (
+                    <>
+                      <Square className="w-4 h-4 fill-white text-white" />
+                      <span>Terminar grabación ({audioDuration}s)</span>
+                    </>
+                  ) : audioBlob ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 text-emerald-400" />
+                      <span>Volver a grabar nota de voz</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="w-4 h-4 text-emerald-400" />
+                      <span>Presiona para comenzar a grabar</span>
+                    </>
+                  )}
+                </button>
 
-              {/* Recorded Audio Player / Reset */}
-              {audioBlob && !isRecording && (
-                <div className="flex items-center gap-2 w-full sm:w-auto bg-stone-900 px-3 py-2 rounded-xl border border-stone-800">
-                  <button
-                    type="button"
-                    onClick={togglePlayAudio}
-                    className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors"
-                    title="Reproducir audio"
-                  >
-                    {isPlayingAudio ? (
-                      <Pause className="w-3.5 h-3.5" />
-                    ) : (
-                      <Play className="w-3.5 h-3.5" />
-                    )}
-                  </button>
+                {/* Recorded Audio Controls */}
+                {audioBlob && !isRecording && (
+                  <div className="flex items-center gap-2 w-full sm:w-auto bg-stone-900 p-2 rounded-xl border border-stone-800">
+                    {/* Direct Hardware Web Audio API Playback Button */}
+                    <button
+                      type="button"
+                      onClick={playAudio}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        isPlayingAudio
+                          ? 'bg-amber-500 hover:bg-amber-400 text-stone-950 shadow-md shadow-amber-500/20'
+                          : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
+                      }`}
+                      title={isPlayingAudio ? 'Pausar reproducción' : 'Reproducir audio'}
+                    >
+                      {isPlayingAudio ? (
+                        <>
+                          <Square className="w-3.5 h-3.5 fill-current" />
+                          <span>Pausar</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>Escuchar ({audioDuration}s)</span>
+                        </>
+                      )}
+                    </button>
 
-                  <span className="text-[11px] font-mono text-stone-300">
-                    Audio ({audioDuration}s)
-                  </span>
+                    {/* Native Audio Tag with Scrubber */}
+                    <audio
+                      ref={audioElementRef}
+                      src={audioUrl || undefined}
+                      controls
+                      onPlay={() => {
+                        if (activeSourceRef.current) {
+                          try { activeSourceRef.current.stop(); } catch {}
+                          activeSourceRef.current = null;
+                        }
+                        setIsPlayingAudio(true);
+                      }}
+                      onPause={() => setIsPlayingAudio(false)}
+                      onEnded={() => setIsPlayingAudio(false)}
+                      className="h-8 max-w-[150px] sm:max-w-[180px] accent-emerald-500"
+                    />
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAudioBlob(null);
-                      setAudioBase64(null);
-                      setAudioUrl(null);
-                      setAudioDuration(0);
-                    }}
-                    className="p-1.5 text-stone-500 hover:text-rose-400 transition-colors ml-1"
-                    title="Eliminar audio"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={discardAudio}
+                      className="p-1.5 text-stone-400 hover:text-rose-400 hover:bg-stone-800 rounded-lg transition-colors cursor-pointer"
+                      title="Eliminar audio y volver a grabar"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Warning if microphone recorded silence */}
+              {audioWarning && (
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+                  <span>{audioWarning}</span>
                 </div>
               )}
             </div>
 
-            {/* Quick voice chip presets */}
+            {/* Notas Adicionales */}
             <div className="pt-2">
-              <span className="text-[10px] uppercase font-bold text-stone-500 block mb-1.5">
-                Ejemplos de detalles hablados:
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  'Cociné con 1 cda de aceite de oliva',
-                  'Añadí 1 cda de mantequilla',
-                  'Salsa BBQ con azúcar',
-                  'Pollo sin piel a la plancha',
-                  'Porción doble de arroz',
-                ].map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => {
-                      setTextNotes((prev) =>
-                        prev ? `${prev}. ${chip}` : chip
-                      );
-                    }}
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-stone-900 hover:bg-stone-800 text-stone-400 hover:text-emerald-300 border border-stone-800 transition-colors"
-                  >
-                    + {chip}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Optional Written Text / Transcription */}
-            <div className="pt-2">
+              <label className="text-xs font-bold text-stone-300 block mb-1.5">
+                Notas adicionales:
+              </label>
               <textarea
-                rows={2}
+                rows={3}
                 value={textNotes}
                 onChange={(e) => setTextNotes(e.target.value)}
-                placeholder="Notas adicionales escritas (opcional)..."
-                className="w-full px-3 py-2 rounded-xl bg-stone-900 border border-stone-800 text-stone-200 text-xs focus:outline-none focus:border-emerald-500"
+                placeholder="Escribe notas adicionales sobre tu comida (ingredientes, salsas, porciones, etc.)..."
+                className="w-full px-3.5 py-2.5 rounded-xl bg-stone-900 border border-stone-800 text-stone-200 text-xs focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
               />
-            </div>
-          </div>
-
-          {/* Quick Presets for Instant Testing */}
-          <div className="p-3.5 rounded-2xl bg-stone-950 border border-stone-800/80">
-            <div className="flex items-center gap-2 mb-2 text-xs font-bold text-stone-300">
-              <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
-              <span>¿Quieres probar rápido? Selecciona un plato de prueba:</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {SAMPLE_MEALS.map((sample, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => handleSelectSample(sample)}
-                  className="flex items-center gap-2 p-2 rounded-xl bg-stone-900 hover:bg-stone-800/80 border border-stone-800 text-left transition-all group"
-                >
-                  <img
-                    src={sample.image}
-                    alt={sample.title}
-                    className="w-10 h-10 rounded-lg object-cover group-hover:scale-105 transition-transform"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <span className="block text-[11px] font-bold text-stone-200 truncate">
-                      {sample.title}
-                    </span>
-                    <span className="block text-[10px] text-emerald-400 capitalize">
-                      {sample.mealType}
-                    </span>
-                  </div>
-                </button>
-              ))}
             </div>
           </div>
         </div>

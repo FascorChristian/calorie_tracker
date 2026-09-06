@@ -4,13 +4,13 @@ import {
   Meal,
   GeminiMealAnalysisResponse,
   GeminiDailyScoreResponse,
-} from '../src/types.js';
+} from '../../shared/types.js';
 import {
   MEAL_ANALYSIS_SYSTEM_PROMPT,
   DAILY_SUMMARY_SYSTEM_PROMPT,
   buildMealUserContextPrompt,
   buildDailySummaryUserContextPrompt,
-} from './prompts.js';
+} from '../prompts/geminiPrompts.js';
 
 // Initialize Gemini Client
 const ai = new GoogleGenAI({
@@ -21,6 +21,52 @@ const ai = new GoogleGenAI({
     },
   },
 });
+
+// Resilient model cascade: if gemini-3.7-flash has 503 high demand spikes, automatically retry and fall back to 3.6 / 3.5
+const FALLBACK_MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
+
+async function generateContentWithRetryAndFallback(params: {
+  contents: any;
+  config: any;
+}): Promise<any> {
+  let lastError: any = null;
+
+  for (let mIdx = 0; mIdx < FALLBACK_MODELS.length; mIdx++) {
+    const model = FALLBACK_MODELS[mIdx];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
+        return response;
+      } catch (err: any) {
+        lastError = err;
+        const status = err?.status || err?.code || (err?.error && err.error.code);
+        const isTransient = status === 503 || status === 429 || status === 500;
+
+        console.warn(
+          `[Gemini AI] Modelo '${model}' falló (intento ${attempt + 1}/2). Error ${status}: ${err.message || 'Alta demanda/Servicio no disponible'}`
+        );
+
+        if (isTransient && attempt < 1) {
+          // Breve pausa exponencial antes de reintentar el mismo modelo
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          continue;
+        }
+
+        // Si se agotaron los intentos o no es transitorio, saltar al siguiente modelo del cascade
+        if (mIdx < FALLBACK_MODELS.length - 1) {
+          console.log(`[Gemini AI] Redirigiendo automáticamente a modelo de respaldo: '${FALLBACK_MODELS[mIdx + 1]}'`);
+        }
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error('No se pudo obtener respuesta de ningún modelo de Gemini');
+}
 
 export async function analyzeMealWithGemini(params: {
   imageBase64?: string;
@@ -91,8 +137,7 @@ export async function analyzeMealWithGemini(params: {
     text: textPrompt,
   });
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.7-flash',
+  const response = await generateContentWithRetryAndFallback({
     contents: { parts },
     config: {
       systemInstruction: MEAL_ANALYSIS_SYSTEM_PROMPT,
@@ -178,8 +223,7 @@ export async function evaluateDailySummaryWithGemini(
 ): Promise<GeminiDailyScoreResponse> {
   const promptText = buildDailySummaryUserContextPrompt(user, meals, date);
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.7-flash',
+  const response = await generateContentWithRetryAndFallback({
     contents: promptText,
     config: {
       systemInstruction: DAILY_SUMMARY_SYSTEM_PROMPT,
@@ -230,3 +274,4 @@ export async function evaluateDailySummaryWithGemini(
     throw new Error('Formato de respuesta de resumen diario inválido');
   }
 }
+
