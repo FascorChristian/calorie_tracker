@@ -1,4 +1,4 @@
-# Glosario de Archivos e Interacciones de NutriVoice AI
+co# Glosario de Archivos e Interacciones de NutriVoice AI
 
 Este glosario documenta cada archivo del proyecto, su responsabilidad dentro de la arquitectura, sus exportaciones clave, los módulos que consume y los módulos que dependen de él.
 
