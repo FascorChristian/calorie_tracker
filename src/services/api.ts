@@ -51,6 +51,18 @@ export const api = {
   },
 
   /**
+   * Obtiene el detalle completo de una comida por ID (incluyendo audio_data_url bajo demanda).
+   */
+  async getMeal(id: string): Promise<Meal> {
+    const res = await fetch(`/api/meals/${encodeURIComponent(id)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Error al obtener detalle de la comida');
+    }
+    return res.json();
+  },
+
+  /**
    * Envía foto y/o nota de voz para análisis multimodal con Gemini.
    */
   async analyzeMeal(
@@ -81,6 +93,26 @@ export const api = {
     }
     const data = await res.json();
     return data.success;
+  },
+
+  /**
+   * Elimina registros de comidas de días anteriores al actual para liberar espacio en disco.
+   * Conserva los resúmenes diarios y las comidas del día de hoy.
+   */
+  async purgePastMeals(
+    beforeDate?: string
+  ): Promise<{ success: boolean; deletedCount: number; message: string }> {
+    const url = beforeDate
+      ? `/api/meals/purge/past?beforeDate=${encodeURIComponent(beforeDate)}`
+      : '/api/meals/purge/past';
+    const res = await fetch(url, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Error al liberar espacio en disco');
+    }
+    return res.json();
   },
 
   /**

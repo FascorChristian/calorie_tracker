@@ -207,7 +207,55 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
     setCameraActive(false);
   };
 
-  const capturePhoto = () => {
+/**
+ * Redimensiona y comprime una imagen a un tamaño máximo (1024px) y calidad JPEG 0.75
+ * para reducir fotos de 10-15MB a ~150-250KB, ahorrando ancho de banda y memoria RAM.
+ */
+function compressImage(source: File | string, maxDimension = 1024, quality = 0.75): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(typeof source === 'string' ? source : '');
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+      const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+      resolve(compressedDataUrl);
+    };
+
+    img.onerror = (err) => reject(err);
+
+    if (typeof source === 'string') {
+      img.src = source;
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(source);
+    }
+  });
+}
+
+  const capturePhoto = async () => {
     if (videoRef.current) {
       const video = videoRef.current;
       const canvas = document.createElement('canvas');
@@ -216,22 +264,33 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        setImageSrc(dataUrl);
+        const rawDataUrl = canvas.toDataURL('image/jpeg', 0.85);
         stopCamera();
+        try {
+          const compressed = await compressImage(rawDataUrl, 1024, 0.75);
+          setImageSrc(compressed);
+        } catch {
+          setImageSrc(rawDataUrl);
+        }
       }
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImageSrc(reader.result as string);
-        stopCamera();
-      };
-      reader.readAsDataURL(file);
+      stopCamera();
+      try {
+        const compressed = await compressImage(file, 1024, 0.75);
+        setImageSrc(compressed);
+      } catch (err) {
+        console.error('Error comprimiendo imagen:', err);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setImageSrc(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      }
     }
   };
 

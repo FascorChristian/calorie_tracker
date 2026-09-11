@@ -11,15 +11,20 @@ import {
   Calculator,
   Check,
   Flame,
+  HardDrive,
+  Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import { UserProfile } from '../../../shared/types.js';
 import { calculateRecommendedTargets, calculateBMR, calculateTDEE } from '../../utils/nutritionCalculators.js';
+import { api } from '../../services/api.js';
 
 interface UserProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: UserProfile | null;
   onSave: (updated: Partial<UserProfile>) => Promise<void>;
+  onPurgeSuccess?: () => void;
 }
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
@@ -27,6 +32,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onClose,
   user,
   onSave,
+  onPurgeSuccess,
 }) => {
   const [formData, setFormData] = useState<Partial<UserProfile>>({
     name: 'Christian Díaz',
@@ -49,6 +55,32 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [prefInput, setPrefInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [showSavedToast, setShowSavedToast] = useState(false);
+
+  // Estados para liberación de almacenamiento
+  const [isPurging, setIsPurging] = useState(false);
+  const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
+  const [purgeResult, setPurgeResult] = useState<string | null>(null);
+
+  const handlePurgePast = async () => {
+    setIsPurging(true);
+    setPurgeResult(null);
+    try {
+      const res = await api.purgePastMeals();
+      setPurgeResult(
+        res.deletedCount > 0
+          ? `¡Espacio liberado! Se eliminaron ${res.deletedCount} registros de días pasados.`
+          : 'No se encontraron registros de días pasados para eliminar.'
+      );
+      setShowPurgeConfirm(false);
+      if (onPurgeSuccess) {
+        onPurgeSuccess();
+      }
+    } catch (err: any) {
+      setPurgeResult(`Error: ${err.message || 'No se pudo completar la limpieza'}`);
+    } finally {
+      setIsPurging(false);
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -480,6 +512,85 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 placeholder="Ej: Resistencia a la insulina, entreno en ayunas a las 7am..."
                 className="w-full px-3.5 py-2 rounded-xl bg-stone-950 border border-stone-800 text-stone-100 text-xs focus:outline-none focus:border-emerald-500"
               />
+            </div>
+          </div>
+
+          {/* Section 5: Storage and Disk Cleanup */}
+          <div className="pt-2 border-t border-stone-800/80">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-3 flex items-center gap-2">
+              <HardDrive className="w-4 h-4 text-rose-400" />
+              5. Gestión de Espacio y Almacenamiento
+            </h3>
+            <div className="p-4 rounded-2xl bg-stone-950 border border-stone-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-stone-200">
+                    Liberar espacio de días anteriores
+                  </h4>
+                  <p className="text-xs text-stone-400 mt-0.5">
+                    Elimina fotos, audios y comidas registradas de días pasados en la base de datos MySQL. Tus resúmenes diarios y metas se mantendrán intactos.
+                  </p>
+                </div>
+                {!showPurgeConfirm && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPurgeConfirm(true)}
+                    className="shrink-0 flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Liberar Espacio
+                  </button>
+                )}
+              </div>
+
+              {/* Confirmation box */}
+              {showPurgeConfirm && (
+                <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/40 space-y-2.5">
+                  <div className="flex items-start gap-2.5 text-xs text-rose-200">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold block">¿Confirmar liberación de disco?</span>
+                      Se borrarán permanentemente las fotos, audios y registros multimedia de comidas de días anteriores al de hoy.
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={isPurging}
+                      onClick={() => setShowPurgeConfirm(false)}
+                      className="px-3 py-1.5 rounded-lg border border-stone-700 hover:bg-stone-800 text-stone-300 text-xs font-medium transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPurging}
+                      onClick={handlePurgePast}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-colors disabled:opacity-50"
+                    >
+                      {isPurging ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          Borrando...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Sí, Borrar Registros Pasados
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Result message */}
+              {purgeResult && (
+                <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>{purgeResult}</span>
+                </div>
+              )}
             </div>
           </div>
 

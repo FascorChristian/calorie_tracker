@@ -197,6 +197,10 @@ export default function App() {
         onClose={() => setIsProfileOpen(false)}
         user={user}
         onSave={handleSaveProfile}
+        onPurgeSuccess={() => {
+          fetchDayData(currentDate);
+          showToast('Limpieza de almacenamiento completada exitosamente.');
+        }}
       />
 
       <MultimodalMealModal

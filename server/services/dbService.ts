@@ -96,24 +96,8 @@ export async function updateUser(
   return getUser(userId);
 }
 
-// 3. Obtener lista de comidas (opcionalmente filtrado por fecha)
-export async function getMeals(
-  date?: string,
-  userId: string = 'user_default'
-): Promise<Meal[]> {
-  let query = 'SELECT * FROM meals WHERE user_id = ?';
-  const params: any[] = [userId];
-
-  if (date) {
-    query += ' AND meal_date = ?';
-    params.push(date);
-  }
-
-  query += ' ORDER BY meal_time ASC';
-
-  const [rows] = await pool.execute<mysql.RowDataPacket[]>(query, params);
-
-  return rows.map((row) => ({
+function mapRowToMeal(row: any): Meal {
+  return {
     id: row.id,
     userId: row.user_id,
     date: row.meal_date,
@@ -136,7 +120,107 @@ export async function getMeals(
     ingredientes_detectados: safeJsonParse<string[]>(row.ingredientes_detectados, []),
     detalles_audio: row.detalles_audio || undefined,
     createdAt: row.created_at,
-  }));
+  };
+}
+
+export interface DailyNutritionalTotals {
+  totalCalories: number;
+  totalProtein: number;
+  totalCarbs: number;
+  totalFat: number;
+  mealsCount: number;
+}
+
+// 3. Totales nutricionales agregados directamente en MySQL (ahorro masivo de RAM)
+export async function getDailyNutritionalTotals(
+  date: string,
+  userId: string = 'user_default'
+): Promise<DailyNutritionalTotals> {
+  const query = `
+    SELECT 
+      COALESCE(SUM(calorias_estimadas), 0) AS totalCalories,
+      COALESCE(SUM(proteinas), 0) AS totalProtein,
+      COALESCE(SUM(carbohidratos), 0) AS totalCarbs,
+      COALESCE(SUM(grasas), 0) AS totalFat,
+      COUNT(*) AS mealsCount
+    FROM meals
+    WHERE user_id = ? AND meal_date = ?
+  `;
+
+  const [rows] = await pool.execute<mysql.RowDataPacket[]>(query, [userId, date]);
+  const row = rows[0];
+
+  return {
+    totalCalories: Number(row?.totalCalories) || 0,
+    totalProtein: Math.round((Number(row?.totalProtein) || 0) * 10) / 10,
+    totalCarbs: Math.round((Number(row?.totalCarbs) || 0) * 10) / 10,
+    totalFat: Math.round((Number(row?.totalFat) || 0) * 10) / 10,
+    mealsCount: Number(row?.mealsCount) || 0,
+  };
+}
+
+// 4. Obtener lista de comidas (proyección selectiva: excluye audio_data_url por defecto para optimizar RAM)
+export async function getMeals(
+  date?: string,
+  userId: string = 'user_default',
+  includeAudio: boolean = false
+): Promise<Meal[]> {
+  const audioColumn = includeAudio ? 'audio_data_url' : 'NULL AS audio_data_url';
+  let query = `
+    SELECT 
+      id, user_id, meal_date, meal_time, meal_type,
+      image_url, ${audioColumn}, audio_duration_seconds, audio_transcript,
+      nombre_plato, calorias_estimadas, proteinas, carbohidratos, grasas, fibra,
+      puntaje_plato, feedback_breve, ingredientes_detectados, detalles_audio, created_at
+    FROM meals 
+    WHERE user_id = ?
+  `;
+  const params: any[] = [userId];
+
+  if (date) {
+    query += ' AND meal_date = ?';
+    params.push(date);
+  }
+
+  query += ' ORDER BY meal_time ASC';
+
+  const [rows] = await pool.execute<mysql.RowDataPacket[]>(query, params);
+  return rows.map(mapRowToMeal);
+}
+
+// 5. Obtener una comida individual por ID con todo su contenido multimedia (audio e imagen)
+export async function getMealById(
+  id: string,
+  userId: string = 'user_default'
+): Promise<Meal | null> {
+  const query = 'SELECT * FROM meals WHERE id = ? AND user_id = ? LIMIT 1';
+  const [rows] = await pool.execute<mysql.RowDataPacket[]>(query, [id, userId]);
+
+  if (!rows || rows.length === 0) {
+    return null;
+  }
+
+  return mapRowToMeal(rows[0]);
+}
+
+// 6. Obtener comidas para el prompt de resumen diario (excluye tanto image_url como audio_data_url)
+export async function getMealsForSummary(
+  date: string,
+  userId: string = 'user_default'
+): Promise<Meal[]> {
+  const query = `
+    SELECT 
+      id, user_id, meal_date, meal_time, meal_type,
+      NULL AS image_url, NULL AS audio_data_url, audio_duration_seconds, audio_transcript,
+      nombre_plato, calorias_estimadas, proteinas, carbohidratos, grasas, fibra,
+      puntaje_plato, feedback_breve, ingredientes_detectados, detalles_audio, created_at
+    FROM meals 
+    WHERE user_id = ? AND meal_date = ?
+    ORDER BY meal_time ASC
+  `;
+
+  const [rows] = await pool.execute<mysql.RowDataPacket[]>(query, [userId, date]);
+  return rows.map(mapRowToMeal);
 }
 
 // 4. Agregar nueva comida
@@ -188,6 +272,18 @@ export async function deleteMeal(id: string): Promise<boolean> {
     [id]
   );
   return result.affectedRows > 0;
+}
+
+// 5b. Eliminar comidas de días anteriores para liberar espacio en disco (fotos y audios)
+export async function purgePastMeals(
+  beforeDate: string,
+  userId: string = 'user_default'
+): Promise<number> {
+  const [result] = await pool.execute<mysql.ResultSetHeader>(
+    'DELETE FROM meals WHERE user_id = ? AND meal_date < ?',
+    [userId, beforeDate]
+  );
+  return result.affectedRows;
 }
 
 // 6. Obtener resumen diario por fecha

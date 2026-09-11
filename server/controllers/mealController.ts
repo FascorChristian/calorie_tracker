@@ -1,5 +1,15 @@
 import { Request, Response } from 'express';
-import { getUser, getMeals, addMeal, deleteMeal, getDailySummary, saveDailySummary } from '../services/dbService.js';
+import {
+  getUser,
+  getMeals,
+  getMealById,
+  addMeal,
+  deleteMeal,
+  purgePastMeals,
+  getDailySummary,
+  saveDailySummary,
+  getDailyNutritionalTotals,
+} from '../services/dbService.js';
 import { analyzeMealWithGemini } from '../services/geminiService.js';
 import { formatToMysqlDateTime, getTodayString } from '../utils/dateUtils.js';
 import { Meal, DailySummary } from '../../shared/types.js';
@@ -7,10 +17,24 @@ import { Meal, DailySummary } from '../../shared/types.js';
 export async function getMealsHandler(req: Request, res: Response) {
   try {
     const date = req.query.date as string | undefined;
-    const meals = await getMeals(date);
+    const includeAudio = req.query.includeAudio === 'true';
+    const meals = await getMeals(date, 'user_default', includeAudio);
     res.json(meals);
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Error al obtener comidas' });
+  }
+}
+
+export async function getMealByIdHandler(req: Request, res: Response) {
+  try {
+    const id = req.params.id;
+    const meal = await getMealById(id);
+    if (!meal) {
+      return res.status(404).json({ error: 'Comida no encontrada' });
+    }
+    res.json(meal);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Error al obtener detalle de comida' });
   }
 }
 
@@ -76,21 +100,17 @@ export async function analyzeMealHandler(req: Request, res: Response) {
 
     const savedMeal = await addMeal(newMeal);
 
-    // Auto-update Daily Summary totals
-    const dayMeals = await getMeals(date);
-    const totalCal = dayMeals.reduce((acc, m) => acc + (m.calorias_estimadas || 0), 0);
-    const totalP = dayMeals.reduce((acc, m) => acc + (m.macros?.proteinas || 0), 0);
-    const totalC = dayMeals.reduce((acc, m) => acc + (m.macros?.carbohidratos || 0), 0);
-    const totalF = dayMeals.reduce((acc, m) => acc + (m.macros?.grasas || 0), 0);
+    // Auto-update Daily Summary totals delegando la agregación a MySQL (ahorro de RAM)
+    const totals = await getDailyNutritionalTotals(date, user.id);
 
     const existingSummary = await getDailySummary(date);
     const updatedSummary: DailySummary = {
       date,
       userId: user.id,
-      totalCalories: totalCal,
-      totalProtein: Math.round(totalP * 10) / 10,
-      totalCarbs: Math.round(totalC * 10) / 10,
-      totalFat: Math.round(totalF * 10) / 10,
+      totalCalories: totals.totalCalories,
+      totalProtein: totals.totalProtein,
+      totalCarbs: totals.totalCarbs,
+      totalFat: totals.totalFat,
       puntaje_diario: existingSummary?.puntaje_diario || Math.min(100, Math.round((savedMeal.puntaje_plato * 10))),
       consejo_diario: existingSummary?.consejo_diario || 'Has añadido un nuevo registro multimodal. Puedes recalcular tu puntaje integral del día cuando desees.',
       balance_nutricional: existingSummary?.balance_nutricional || 'En progreso',
@@ -100,7 +120,7 @@ export async function analyzeMealHandler(req: Request, res: Response) {
       areas_de_mejora: existingSummary?.areas_de_mejora || [
         `Mantén el seguimiento de hidratación y próximas comidas.`,
       ],
-      mealsCount: dayMeals.length,
+      mealsCount: totals.mealsCount,
       updatedAt: formatToMysqlDateTime(),
     };
     await saveDailySummary(updatedSummary);
@@ -125,6 +145,26 @@ export async function deleteMealHandler(req: Request, res: Response) {
     res.json({ success });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Error al eliminar comida' });
+  }
+}
+
+export async function purgePastMealsHandler(req: Request, res: Response) {
+  try {
+    const beforeDate =
+      (req.query.beforeDate as string) ||
+      (req.body?.beforeDate as string) ||
+      getTodayString();
+
+    const deletedCount = await purgePastMeals(beforeDate, 'user_default');
+    res.json({
+      success: true,
+      deletedCount,
+      beforeDate,
+      message: `Se eliminaron ${deletedCount} registros anteriores al día de hoy para liberar espacio en disco.`,
+    });
+  } catch (err: any) {
+    console.error('Error in purgePastMealsHandler:', err);
+    res.status(500).json({ error: err.message || 'Error al liberar espacio de días anteriores' });
   }
 }
 

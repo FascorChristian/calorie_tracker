@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Sparkles,
@@ -11,6 +11,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { Meal } from '../../../shared/types.js';
+import { api } from '../../services/api.js';
 
 interface MealDetailModalProps {
   meal: Meal | null;
@@ -23,22 +24,36 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({
   onClose,
   onDelete,
 }) => {
-  if (!meal) return null;
+  const [detailedMeal, setDetailedMeal] = useState<Meal | null>(meal);
 
-  const totalMacros = (meal.macros.proteinas || 0) + (meal.macros.carbohidratos || 0) + (meal.macros.grasas || 0);
-  const pPct = totalMacros ? Math.round((meal.macros.proteinas / totalMacros) * 100) : 33;
-  const cPct = totalMacros ? Math.round((meal.macros.carbohidratos / totalMacros) * 100) : 33;
-  const fPct = totalMacros ? Math.round((meal.macros.grasas / totalMacros) * 100) : 34;
+  useEffect(() => {
+    setDetailedMeal(meal);
+    if (meal && !meal.audioDataUrl && meal.audioDurationSeconds && meal.audioDurationSeconds > 0) {
+      api.getMeal(meal.id)
+        .then((data) => {
+          if (data) setDetailedMeal(data);
+        })
+        .catch((err) => console.error('Error cargando audio bajo demanda:', err));
+    }
+  }, [meal]);
+
+  if (!meal) return null;
+  const currentMeal = detailedMeal || meal;
+
+  const totalMacros = (currentMeal.macros.proteinas || 0) + (currentMeal.macros.carbohidratos || 0) + (currentMeal.macros.grasas || 0);
+  const pPct = totalMacros ? Math.round((currentMeal.macros.proteinas / totalMacros) * 100) : 33;
+  const cPct = totalMacros ? Math.round((currentMeal.macros.carbohidratos / totalMacros) * 100) : 33;
+  const fPct = totalMacros ? Math.round((currentMeal.macros.grasas / totalMacros) * 100) : 34;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
       <div className="relative w-full max-w-xl bg-stone-900 border border-stone-800 rounded-3xl shadow-2xl overflow-hidden my-6">
         {/* Image Header or Gradient */}
-        {meal.imageUrl ? (
+        {currentMeal.imageUrl ? (
           <div className="relative aspect-video w-full bg-stone-950 overflow-hidden">
             <img
-              src={meal.imageUrl}
-              alt={meal.nombre_plato}
+              src={currentMeal.imageUrl}
+              alt={currentMeal.nombre_plato}
               className="w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-stone-900 via-transparent to-black/40" />
@@ -50,10 +65,10 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({
             </button>
             <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between">
               <span className="px-2.5 py-1 rounded-lg bg-emerald-500 text-stone-950 font-bold text-xs capitalize shadow-md">
-                {meal.mealType}
+                {currentMeal.mealType}
               </span>
               <span className="px-2.5 py-1 rounded-lg bg-stone-900/90 text-stone-200 text-xs font-mono border border-stone-700">
-                {meal.time}
+                {currentMeal.time}
               </span>
             </div>
           </div>
@@ -61,9 +76,9 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({
           <div className="px-6 py-4 bg-stone-850 border-b border-stone-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-1 rounded-lg bg-emerald-500 text-stone-950 font-bold text-xs capitalize">
-                {meal.mealType}
+                {currentMeal.mealType}
               </span>
-              <span className="text-xs text-stone-400">{meal.time}</span>
+              <span className="text-xs text-stone-400">{currentMeal.time}</span>
             </div>
             <button
               onClick={onClose}
@@ -78,16 +93,16 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({
         <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
           <div>
             <h2 className="text-xl font-bold text-stone-100 leading-snug">
-              {meal.nombre_plato}
+              {currentMeal.nombre_plato}
             </h2>
             <div className="flex items-center gap-3 mt-2">
               <span className="text-2xl font-extrabold text-emerald-400 flex items-center gap-1">
                 <Flame className="w-5 h-5" />
-                {meal.calorias_estimadas} <span className="text-xs font-normal text-stone-400">kcal</span>
+                {currentMeal.calorias_estimadas} <span className="text-xs font-normal text-stone-400">kcal</span>
               </span>
 
               <div className="px-2.5 py-1 rounded-xl bg-stone-800 border border-stone-700 text-xs font-bold text-teal-300">
-                Puntaje Nutricional: {meal.puntaje_plato}/10
+                Puntaje Nutricional: {currentMeal.puntaje_plato}/10
               </div>
             </div>
           </div>
@@ -118,15 +133,15 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({
             <div className="grid grid-cols-3 gap-2 pt-1 text-center">
               <div className="bg-stone-900/80 p-2 rounded-xl border border-stone-800">
                 <span className="text-[10px] text-teal-400 font-bold block">Proteína</span>
-                <span className="text-sm font-extrabold text-stone-100">{meal.macros.proteinas}g</span>
+                <span className="text-sm font-extrabold text-stone-100">{currentMeal.macros.proteinas}g</span>
               </div>
               <div className="bg-stone-900/80 p-2 rounded-xl border border-stone-800">
                 <span className="text-[10px] text-amber-400 font-bold block">Carbos</span>
-                <span className="text-sm font-extrabold text-stone-100">{meal.macros.carbohidratos}g</span>
+                <span className="text-sm font-extrabold text-stone-100">{currentMeal.macros.carbohidratos}g</span>
               </div>
               <div className="bg-stone-900/80 p-2 rounded-xl border border-stone-800">
                 <span className="text-[10px] text-rose-400 font-bold block">Grasas</span>
-                <span className="text-sm font-extrabold text-stone-100">{meal.macros.grasas}g</span>
+                <span className="text-sm font-extrabold text-stone-100">{currentMeal.macros.grasas}g</span>
               </div>
             </div>
           </div>
@@ -138,50 +153,50 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({
               <span>Feedback Nutricional Personalizado</span>
             </div>
             <p className="text-xs text-stone-300 leading-relaxed">
-              {meal.feedback_breve}
+              {currentMeal.feedback_breve}
             </p>
           </div>
 
           {/* Voice note audio player and/or transcript */}
-          {(meal.audioDataUrl || meal.detalles_audio) && (
+          {(currentMeal.audioDataUrl || currentMeal.detalles_audio) && (
             <div className="p-4 rounded-2xl bg-stone-950 border border-stone-800 space-y-2.5">
               <div className="flex items-center justify-between text-xs font-bold text-stone-300">
                 <span className="flex items-center gap-2">
                   <Volume2 className="w-4 h-4 text-emerald-400" />
                   Nota de Voz Grabada
                 </span>
-                {meal.audioDurationSeconds ? (
+                {currentMeal.audioDurationSeconds ? (
                   <span className="text-[11px] text-stone-500 font-mono">
-                    {meal.audioDurationSeconds}s
+                    {currentMeal.audioDurationSeconds}s
                   </span>
                 ) : null}
               </div>
 
-              {meal.audioDataUrl && (
+              {currentMeal.audioDataUrl && (
                 <audio
-                  src={meal.audioDataUrl}
+                  src={currentMeal.audioDataUrl}
                   controls
                   className="w-full h-8 accent-emerald-500"
                 />
               )}
 
-              {meal.detalles_audio && (
+              {currentMeal.detalles_audio && (
                 <p className="text-xs text-stone-400 italic">
-                  "{meal.detalles_audio}"
+                  "{currentMeal.detalles_audio}"
                 </p>
               )}
             </div>
           )}
 
           {/* Ingredients list */}
-          {meal.ingredientes_detectados?.length > 0 && (
+          {currentMeal.ingredientes_detectados?.length > 0 && (
             <div className="space-y-2">
               <span className="text-xs font-bold text-stone-300 flex items-center gap-1.5">
                 <Utensils className="w-3.5 h-3.5 text-teal-400" />
                 Ingredientes & Porciones Detectadas
               </span>
               <div className="flex flex-wrap gap-1.5">
-                {meal.ingredientes_detectados.map((ing, idx) => (
+                {currentMeal.ingredientes_detectados.map((ing, idx) => (
                   <span
                     key={idx}
                     className="text-xs px-3 py-1 rounded-xl bg-stone-950 border border-stone-800 text-stone-300"
@@ -199,7 +214,7 @@ export const MealDetailModal: React.FC<MealDetailModalProps> = ({
           <button
             onClick={() => {
               if (confirm('¿Eliminar este registro de comida?')) {
-                onDelete(meal.id);
+                onDelete(currentMeal.id);
                 onClose();
               }
             }}
