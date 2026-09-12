@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Play,
+  Clock,
 } from 'lucide-react';
 import { Meal, UserProfile } from '../../../shared/types.js';
 
@@ -19,6 +20,22 @@ interface MultimodalMealModalProps {
   onClose: () => void;
   user: UserProfile | null;
   onMealCreated: (newMeal: Meal) => void;
+  currentDate?: string;
+}
+
+function getSantiagoCurrentTime(): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Santiago',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    });
+    return formatter.format(new Date());
+  } catch {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  }
 }
 
 // Convert an AudioBuffer to standard 16-bit PCM WAV Blob (Mono for voice recordings)
@@ -70,11 +87,13 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   onClose,
   user,
   onMealCreated,
+  currentDate,
 }) => {
   // Mode: 'camera' | 'upload' | 'preview'
   const [cameraActive, setCameraActive] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [mealType, setMealType] = useState<'desayuno' | 'almuerzo' | 'cena' | 'snack'>('almuerzo');
+  const [mealTime, setMealTime] = useState<string>(getSantiagoCurrentTime());
   const [textNotes, setTextNotes] = useState('');
   
   // Audio state
@@ -104,17 +123,14 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const isStartingAudioRef = useRef<boolean>(false);
 
-  // Direct Web Audio API playback refs
-  const decodedAudioBufferRef = useRef<AudioBuffer | null>(null);
-  const playbackCtxRef = useRef<AudioContext | null>(null);
-  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
-
   useEffect(() => {
     if (!isOpen) {
       stopCamera();
       stopRecording();
       discardAudio();
       resetForm();
+    } else {
+      setMealTime(getSantiagoCurrentTime());
     }
   }, [isOpen]);
 
@@ -125,11 +141,15 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
       if (audioUrl) {
         URL.revokeObjectURL(audioUrl);
       }
-      if (playbackCtxRef.current && playbackCtxRef.current.state !== 'closed') {
-        playbackCtxRef.current.close().catch(() => {});
-      }
     };
   }, []);
+
+  // Asegura que el elemento <audio> cargue inmediatamente el nuevo audio grabado
+  useEffect(() => {
+    if (audioElementRef.current && (audioUrl || audioBase64)) {
+      audioElementRef.current.load();
+    }
+  }, [audioUrl, audioBase64]);
 
   useEffect(() => {
     if (cameraActive && mediaStreamRef.current && videoRef.current) {
@@ -142,12 +162,6 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
 
   const discardAudio = () => {
     stopRecording();
-    if (activeSourceRef.current) {
-      try {
-        activeSourceRef.current.stop();
-      } catch {}
-      activeSourceRef.current = null;
-    }
     if (audioElementRef.current) {
       audioElementRef.current.pause();
       audioElementRef.current.currentTime = 0;
@@ -155,7 +169,6 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
     if (audioUrl) {
       URL.revokeObjectURL(audioUrl);
     }
-    decodedAudioBufferRef.current = null;
     setIsPlayingAudio(false);
     setAudioBlob(null);
     setAudioBase64(null);
@@ -370,9 +383,6 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
           const decodeCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
           const audioBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
 
-          // Save decoded buffer for direct Web Audio hardware playback
-          decodedAudioBufferRef.current = audioBuffer;
-
           // Check amplitude across audio samples to warn if mic was muted in Windows
           let maxAmp = 0;
           const channelData = audioBuffer.getChannelData(0);
@@ -483,73 +493,28 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
   };
 
   const playAudio = async () => {
+    if (!audioElementRef.current) return;
+
     if (isPlayingAudio) {
-      if (activeSourceRef.current) {
-        try {
-          activeSourceRef.current.stop();
-        } catch {}
-        activeSourceRef.current = null;
-      }
-      if (audioElementRef.current) {
-        audioElementRef.current.pause();
-        audioElementRef.current.currentTime = 0;
-      }
+      audioElementRef.current.pause();
       setIsPlayingAudio(false);
       return;
     }
 
-    // 1. Direct Web Audio API playback from decoded buffer (hardware direct, no browser container bug)
-    if (decodedAudioBufferRef.current) {
-      try {
-        if (!playbackCtxRef.current || playbackCtxRef.current.state === 'closed') {
-          playbackCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        }
-        const ctx = playbackCtxRef.current;
-        if (ctx.state === 'suspended') {
-          await ctx.resume();
-        }
-
-        if (activeSourceRef.current) {
-          try { activeSourceRef.current.stop(); } catch {}
-          activeSourceRef.current = null;
-        }
-
-        if (audioElementRef.current) {
-          audioElementRef.current.pause();
-        }
-
-        const source = ctx.createBufferSource();
-        source.buffer = decodedAudioBufferRef.current;
-
-        const gain = ctx.createGain();
-        gain.gain.value = 1.0;
-        source.connect(gain);
-        gain.connect(ctx.destination);
-
-        source.onended = () => {
-          setIsPlayingAudio(false);
-          activeSourceRef.current = null;
-        };
-
-        activeSourceRef.current = source;
-        source.start(0);
-        setIsPlayingAudio(true);
-        return;
-      } catch (err) {
-        console.warn('Web Audio direct playback failed, falling back to HTMLAudioElement:', err);
+    try {
+      if (audioElementRef.current.ended) {
+        audioElementRef.current.currentTime = 0;
       }
-    }
-
-    // 2. Fallback to HTML Audio Element with WAV URL
-    if (audioUrl) {
+      await audioElementRef.current.play();
+      setIsPlayingAudio(true);
+    } catch (err: any) {
+      console.warn('HTMLAudioElement play falló, reintentando tras load():', err);
       try {
-        if (audioElementRef.current) {
-          audioElementRef.current.currentTime = 0;
-          await audioElementRef.current.play();
-          setIsPlayingAudio(true);
-        }
-      } catch (err) {
-        console.error('HTMLAudioElement play failed:', err);
+        audioElementRef.current.load();
+        await audioElementRef.current.play();
+        setIsPlayingAudio(true);
+      } catch (retryErr) {
+        console.error('Fallo al reproducir audio grabado:', retryErr);
         setErrorMessage('No se pudo reproducir el audio. Verifica tu dispositivo de salida de sonido.');
         setIsPlayingAudio(false);
       }
@@ -629,6 +594,8 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
           audioDurationSeconds: audioDuration,
           mealType: mealType,
           notes: textNotes || undefined,
+          date: currentDate || undefined,
+          time: mealTime || undefined,
         }),
       });
 
@@ -692,22 +659,38 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
             </div>
           )}
 
-          {/* Meal Type Selection */}
-          <div className="flex items-center justify-between bg-stone-950/80 p-1.5 rounded-2xl border border-stone-800">
-            {(['desayuno', 'almuerzo', 'cena', 'snack'] as const).map((type) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => setMealType(type)}
-                className={`flex-1 py-2 text-xs font-bold rounded-xl capitalize transition-all ${
-                  mealType === type
-                    ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-stone-950 shadow-md'
-                    : 'text-stone-400 hover:text-stone-200'
-                }`}
-              >
-                {type}
-              </button>
-            ))}
+          {/* Meal Type and Time Selection */}
+          <div className="flex flex-col sm:flex-row gap-2.5">
+            <div className="flex-1 flex items-center justify-between bg-stone-950/80 p-1.5 rounded-2xl border border-stone-800">
+              {(['desayuno', 'almuerzo', 'cena', 'snack'] as const).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setMealType(type)}
+                  className={`flex-1 py-2 text-xs font-bold rounded-xl capitalize transition-all ${
+                    mealType === type
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-stone-950 shadow-md'
+                      : 'text-stone-400 hover:text-stone-200'
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 bg-stone-950/80 px-3.5 py-2 rounded-2xl border border-stone-800 shrink-0 self-start sm:self-auto">
+              <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-stone-400 font-medium">Hora:</span>
+                <input
+                  type="time"
+                  value={mealTime}
+                  onChange={(e) => setMealTime(e.target.value)}
+                  className="bg-transparent text-stone-100 text-xs font-semibold focus:outline-none focus:text-emerald-400 cursor-pointer"
+                  title="Hora del plato (Santiago, Chile)"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Photo Capture Section */}
@@ -905,18 +888,12 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
                     {/* Native Audio Tag with Scrubber */}
                     <audio
                       ref={audioElementRef}
-                      src={audioUrl || undefined}
+                      src={audioUrl || audioBase64 || undefined}
                       controls
-                      onPlay={() => {
-                        if (activeSourceRef.current) {
-                          try { activeSourceRef.current.stop(); } catch {}
-                          activeSourceRef.current = null;
-                        }
-                        setIsPlayingAudio(true);
-                      }}
+                      onPlay={() => setIsPlayingAudio(true)}
                       onPause={() => setIsPlayingAudio(false)}
                       onEnded={() => setIsPlayingAudio(false)}
-                      className="h-8 max-w-[150px] sm:max-w-[180px] accent-emerald-500"
+                      className="h-8 max-w-[160px] sm:max-w-[200px] accent-emerald-500"
                     />
 
                     <button

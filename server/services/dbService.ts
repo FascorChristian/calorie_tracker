@@ -283,6 +283,14 @@ export async function purgePastMeals(
     'DELETE FROM meals WHERE user_id = ? AND meal_date < ?',
     [userId, beforeDate]
   );
+
+  // Opción A: Reconstruir físicamente el archivo .ibd (InnoDB) para devolver el espacio libre al disco del SO
+  try {
+    await pool.query('OPTIMIZE TABLE meals');
+  } catch (optErr) {
+    console.warn('Advertencia al ejecutar OPTIMIZE TABLE meals:', optErr);
+  }
+
   return result.affectedRows;
 }
 

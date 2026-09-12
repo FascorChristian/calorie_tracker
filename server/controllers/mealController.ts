@@ -11,7 +11,7 @@ import {
   getDailyNutritionalTotals,
 } from '../services/dbService.js';
 import { analyzeMealWithGemini } from '../services/geminiService.js';
-import { formatToMysqlDateTime, getTodayString } from '../utils/dateUtils.js';
+import { formatToMysqlDateTime, getTodayString, getSantiagoTimeString } from '../utils/dateUtils.js';
 import { Meal, DailySummary } from '../../shared/types.js';
 
 export async function getMealsHandler(req: Request, res: Response) {
@@ -49,7 +49,7 @@ export async function analyzeMealHandler(req: Request, res: Response) {
       audioDurationSeconds,
       mealType = 'almuerzo',
       notes,
-      date = getTodayString(),
+      date,
       time,
     } = req.body;
 
@@ -73,15 +73,14 @@ export async function analyzeMealHandler(req: Request, res: Response) {
       notes,
     });
 
-    const now = new Date();
-    const mealTime =
-      time ||
-      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    // Zona horaria de Santiago (Chile) si no se especifica explícitamente
+    const mealDate = date || getTodayString();
+    const mealTime = time || getSantiagoTimeString();
 
     const newMeal: Meal = {
       id: 'meal_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       userId: user.id,
-      date: date,
+      date: mealDate,
       time: mealTime,
       mealType: mealType,
       imageUrl: imageBase64,
@@ -101,11 +100,11 @@ export async function analyzeMealHandler(req: Request, res: Response) {
     const savedMeal = await addMeal(newMeal);
 
     // Auto-update Daily Summary totals delegando la agregación a MySQL (ahorro de RAM)
-    const totals = await getDailyNutritionalTotals(date, user.id);
+    const totals = await getDailyNutritionalTotals(mealDate, user.id);
 
-    const existingSummary = await getDailySummary(date);
+    const existingSummary = await getDailySummary(mealDate);
     const updatedSummary: DailySummary = {
-      date,
+      date: mealDate,
       userId: user.id,
       totalCalories: totals.totalCalories,
       totalProtein: totals.totalProtein,

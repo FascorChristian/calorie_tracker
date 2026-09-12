@@ -11,11 +11,26 @@ import { api } from './services/api.js';
 import { Sparkles, RefreshCw } from 'lucide-react';
 
 function getTodayString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  try {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Santiago',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.formatToParts(new Date());
+    const partMap: Record<string, string> = {};
+    for (const p of parts) {
+      if (p.type !== 'literal') partMap[p.type] = p.value;
+    }
+    return `${partMap.year}-${partMap.month}-${partMap.day}`;
+  } catch {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 }
 
 export default function App() {
@@ -208,6 +223,7 @@ export default function App() {
         onClose={() => setIsNewMealOpen(false)}
         user={user}
         onMealCreated={handleMealCreated}
+        currentDate={currentDate}
       />
 
       <MealDetailModal

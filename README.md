@@ -25,11 +25,13 @@ Desarrollo a partir de un prompt de AI Studio con modificaciones propias.
 
 # to do list 
 # 1. hora no es la de stg
-# 2. eficientar querys (menos ram)
 # 3. resumen semanal 
 # 4. puntaje al momento del dia 
 # 5. ui desborda pagina ihpone
 # 6. no reproduce el audio en el modal de grabacion 
-# 7. vaciado de base de datos. 
 # 8. mejorar prompts de identificacion de alimentos
-# 9. mejorar formulas para calcular macros
+
+
+# 2. eficientar querys (menos ram)
+# 7. vaciado de base de datos. 
+# 9. mejorar calculos de macros
