@@ -9,8 +9,9 @@ import {
   getDailySummary,
   saveDailySummary,
   getDailyNutritionalTotals,
-} from '../services/dbService.js';
+} from '../services/googleSheetsService.js';
 import { analyzeMealWithGemini } from '../services/geminiService.js';
+import { uploadMealImageToDrive, deleteImageFromDrive } from '../services/googleDriveService.js';
 import { formatToMysqlDateTime, getTodayString, getSantiagoTimeString } from '../utils/dateUtils.js';
 import { Meal, DailySummary } from '../../shared/types.js';
 
@@ -73,6 +74,26 @@ export async function analyzeMealHandler(req: Request, res: Response) {
       notes,
     });
 
+    // Subir foto a Google Drive si se incluyó una imagen
+    let driveImageUrl: string | undefined = undefined;
+    let driveFileId: string | undefined = undefined;
+
+    if (imageBase64) {
+      try {
+        const uploadResult = await uploadMealImageToDrive({
+          imageBase64,
+          fileName: `comida_${Date.now()}_${mealType}.jpg`,
+          mimeType: imageMimeType || 'image/jpeg',
+        });
+        driveImageUrl = uploadResult.directImageUrl;
+        driveFileId = uploadResult.fileId;
+      } catch (driveErr: any) {
+        console.warn('Aviso: No se pudo subir imagen a Google Drive, usando respaldo:', driveErr?.message || driveErr);
+        // Respaldo para que la app no falle si Drive no está configurado
+        driveImageUrl = imageBase64;
+      }
+    }
+
     // Zona horaria de Santiago (Chile) si no se especifica explícitamente
     const mealDate = date || getTodayString();
     const mealTime = time || getSantiagoTimeString();
@@ -83,7 +104,8 @@ export async function analyzeMealHandler(req: Request, res: Response) {
       date: mealDate,
       time: mealTime,
       mealType: mealType,
-      imageUrl: imageBase64,
+      imageUrl: driveImageUrl,
+      driveFileId: driveFileId,
       audioDataUrl: audioBase64,
       audioDurationSeconds: audioDurationSeconds || 0,
       audioTranscript: analysis.detalles_audio,
@@ -99,7 +121,7 @@ export async function analyzeMealHandler(req: Request, res: Response) {
 
     const savedMeal = await addMeal(newMeal);
 
-    // Auto-update Daily Summary totals delegando la agregación a MySQL (ahorro de RAM)
+    // Auto-update Daily Summary totals en Google Sheets
     const totals = await getDailyNutritionalTotals(mealDate, user.id);
 
     const existingSummary = await getDailySummary(mealDate);
@@ -140,6 +162,10 @@ export async function analyzeMealHandler(req: Request, res: Response) {
 export async function deleteMealHandler(req: Request, res: Response) {
   try {
     const id = req.params.id;
+    const meal = await getMealById(id);
+    if (meal?.driveFileId) {
+      await deleteImageFromDrive(meal.driveFileId).catch(() => {});
+    }
     const success = await deleteMeal(id);
     res.json({ success });
   } catch (err: any) {

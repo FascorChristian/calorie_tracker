@@ -6,14 +6,17 @@ Bienvenido a la documentación arquitectónica de **NutriVoice AI**. Este docume
 
 ## 1. Visión General del Sistema
 
-**NutriVoice AI** es una aplicación fullstack para el seguimiento nutricional inteligente y personalizado. Combina la captura visual de alimentos (fotografías) con notas de voz naturales y el perfil biométrico del usuario, procesándolos mediante modelos de lenguaje y visión multimodal de última generación (**Google Gemini 3.7 / 3.6 / 3.5 Flash**) y persistiendo los registros en una base de datos relacional (**MySQL**).
+**NutriVoice AI** es una aplicación fullstack para el seguimiento nutricional inteligente y personalizado. Combina la captura visual de alimentos (fotografías) con notas de voz naturales y el perfil biométrico del usuario, procesándolos mediante modelos de lenguaje y visión multimodal de última generación (**Google Gemini 3.7 / 3.6 / 3.5 Flash**) y persistiendo los registros en **Google Sheets** (como base de datos estructurada en la nube) y las fotografías directamente en una carpeta designada de **Google Drive**.
 
 ### Principios Arquitectónicos
-1. **Separación de Responsabilidades (SoC):** Cada módulo tiene una función única y delimitada (controladores para HTTP, servicios para lógica de negocio/IA, configuración para infraestructura, utilidades para funciones puras).
+1. **Separación de Responsabilidades (SoC):** Cada módulo tiene una función única y delimitada (controladores para HTTP, servicios para lógica de negocio/IA/Sheets/Drive, configuración para infraestructura, utilidades para funciones puras).
 2. **Contratos Compartidos (`shared/`):** El Frontend y el Backend comparten las mismas interfaces de TypeScript, evitando desincronización de modelos de datos o payloads de red.
 3. **Cliente HTTP Tipado Centralizado (`api.ts`):** Los componentes de UI nunca invocan llamadas de red `fetch` directas ni construyen endpoints arbitrarios; consumen un servicio tipado.
 4. **Resiliencia y Alta Disponibilidad de IA (Cascade & Retry):** El servicio de Gemini implementa reintentos automáticos con retroceso exponencial y conmutación por error (*fallback cascade*) entre modelos ante picos de demanda (errores 503/429).
-5. **Integridad Temporal en Persistencia:** Las fechas y marcas de tiempo se formatean estrictamente en formato ISO y MySQL DATETIME (`YYYY-MM-DD HH:MM:SS`), desarmando y rearmando componentes de fecha para evitar truncamientos o errores de zona horaria.
+5. **Almacenamiento Cloud Nativo con Google Sheets & Drive:**
+   - La base de datos opera sobre Google Sheets (`Comidas`, `Usuarios`, `Resumenes_Diarios`), auto-inicializando encabezados y hojas si no existen.
+   - Las imágenes capturadas o subidas se almacenan en una carpeta de Google Drive configurada, generando enlaces de visualización pública y liberando la memoria y base de datos de almacenar imágenes pesadas en Base64.
+6. **Integridad Temporal en Persistencia:** Las fechas y marcas de tiempo se formatean estrictamente en formato ISO (`YYYY-MM-DD HH:MM:SS`), desarmando y rearmando componentes de fecha con respecto a la zona horaria de Santiago de Chile (`America/Santiago`) para evitar discrepancias temporales.
 
 ---
 
@@ -37,34 +40,39 @@ graph TD
         Server_Entry["server/index.ts (App Bootstrap & Vite Middleware)"]
         Routes["server/routes/ (userRoutes, mealRoutes, summaryRoutes)"]
         Controllers["server/controllers/ (user, meal, summary)"]
-        Date_Utils["server/utils/dateUtils.ts (formatToMysqlDateTime)"]
-        DB_Service["server/services/dbService.ts"]
+        Date_Utils["server/utils/dateUtils.ts"]
+        Sheets_Service["server/services/googleSheetsService.ts"]
+        Drive_Service["server/services/googleDriveService.ts"]
         Gemini_Service["server/services/geminiService.ts"]
         Prompts["server/prompts/geminiPrompts.ts"]
 
         Server_Entry --> Routes
         Routes --> Controllers
-        Controllers --> DB_Service
+        Controllers --> Sheets_Service
+        Controllers --> Drive_Service
         Controllers --> Gemini_Service
         Controllers --> Date_Utils
         Gemini_Service --> Prompts
-        DB_Service --> Date_Utils
+        Sheets_Service --> Date_Utils
     end
 
-    subgraph External_Storage ["Infraestructura Externa"]
-        MySQL_DB[("MySQL Database (users, meals, daily_summaries)")]
+    subgraph External_Cloud ["Infraestructura y Servicios en la Nube"]
+        Google_Sheets[("Google Sheets (Comidas, Usuarios, Resumenes)")]
+        Google_Drive[("Google Drive (Carpeta de Fotos de Comidas)")]
+        Google_Auth["server/config/google.ts (Service Account Auth)"]
         Gemini_API["Google Gemini API (3.7-flash -> 3.6-flash -> 3.5-flash)"]
-        DB_Pool["server/config/db.ts (Connection Pool)"]
         
-        DB_Service --> DB_Pool
-        DB_Pool --> MySQL_DB
+        Sheets_Service --> Google_Auth
+        Drive_Service --> Google_Auth
+        Google_Auth --> Google_Sheets
+        Google_Auth --> Google_Drive
         Gemini_Service --> Gemini_API
     end
 
     API_Client -.->|HTTP / REST JSON| Routes
     UI_Components -.->|Tipos| Shared_Types
     Controllers -.->|Tipos| Shared_Types
-    DB_Service -.->|Tipos| Shared_Types
+    Sheets_Service -.->|Tipos| Shared_Types
     Gemini_Service -.->|Tipos| Shared_Types
 ```
 
@@ -80,13 +88,14 @@ calorie_tracker/
 │
 ├── server/                             # Backend (Node.js / Express / TypeScript)
 │   ├── config/
-│   │   └── db.ts                       # Conexión y Pool de MySQL
+│   │   ├── google.ts                   # Autenticación y clientes de Google Sheets & Drive API
+│   │   └── db.ts                       # Conexión y Pool de MySQL (Legacy / Backup)
 │   ├── controllers/                    # Manejadores de solicitudes HTTP (Req/Res)
 │   │   ├── userController.ts           # Perfil y metas biométricas
-│   │   ├── mealController.ts           # Listado, análisis multimodal y borrado
+│   │   ├── mealController.ts           # Listado, análisis multimodal, subida a Drive y borrado
 │   │   └── summaryController.ts        # Resumen diario y evaluación integral
 │   ├── database/
-│   │   └── schema.sql                  # Esquema DDL y semillas de MySQL
+│   │   └── schema.sql                  # Esquema DDL y semillas de MySQL (Legacy)
 │   ├── prompts/
 │   │   └── geminiPrompts.ts            # Prompts del sistema e inyección de contexto
 │   ├── routes/                         # Enrutadores Express modulares
@@ -95,10 +104,12 @@ calorie_tracker/
 │   │   ├── mealRoutes.ts               # Sub-ruta /api/meals
 │   │   └── summaryRoutes.ts            # Sub-ruta /api/daily-summary
 │   ├── services/                       # Capa de servicios e integraciones
-│   │   ├── dbService.ts                # Operaciones CRUD tipadas contra MySQL
+│   │   ├── googleSheetsService.ts      # Persistencia principal en Google Sheets (Comidas, Usuarios, Resumenes)
+│   │   ├── googleDriveService.ts       # Subida y gestión de fotos en carpeta Google Drive
+│   │   ├── dbService.ts                # Operaciones CRUD sobre MySQL (Legacy / Respaldo)
 │   │   └── geminiService.ts            # Comunicación multimodal y cascade con Gemini
 │   ├── utils/
-│   │   └── dateUtils.ts                # Funciones de parseo y formateo seguro de fechas
+│   │   └── dateUtils.ts                # Funciones de parseo, zona horaria y formateo de fechas
 │   └── index.ts                        # Punto de entrada del servidor y middleware Vite
 │
 ├── src/                                # Frontend (React 19 + TypeScript)
@@ -148,18 +159,17 @@ Implementada con **React 19**, **Tailwind CSS v4** y **Lucide Icons**:
 
 ### 4.3. Capa de Controladores y Rutas (`server/controllers/`, `server/routes/`)
 - **`routes/`**: Define los endpoints RESTful, aplicando métodos HTTP estándar (`GET`, `POST`, `DELETE`).
-- **`controllers/`**: Extrae los parámetros de la solicitud, valida la entrada, coordina los servicios necesarios (`dbService`, `geminiService`, `dateUtils`) y envía la respuesta HTTP con los códigos de estado correspondientes.
+- **`controllers/`**: Extrae los parámetros de la solicitud, valida la entrada, coordina los servicios necesarios (`googleSheetsService`, `googleDriveService`, `geminiService`, `dateUtils`) y envía la respuesta HTTP con los códigos de estado correspondientes.
 
 ### 4.4. Capa de Servicios (`server/services/`)
-- **`dbService.ts`**: Abstrae todas las sentencias SQL parametrizadas (`pool.execute(...)`), asegurando protección contra inyecciones SQL y transformando filas de base de datos a objetos tipados.
+- **`googleSheetsService.ts`**: Abstrae todas las operaciones sobre Google Sheets (`Comidas`, `Usuarios`, `Resumenes_Diarios`), auto-inicializando encabezados y hojas si faltan, y ejecutando agregaciones en memoria de forma ultra ligera.
+- **`googleDriveService.ts`**: Convierte fotos Base64 en buffers de imagen, las sube a la carpeta de Google Drive configurada, les asigna permisos de lectura pública y genera URLs directas de Google CDN (`https://lh3.googleusercontent.com/d/${fileId}`).
 - **`geminiService.ts`**: Encapsula el SDK `@google/genai`. Convierte imágenes a Base64 InlineData, convierte audio grabado a formato compatible de audio, inyecta el esquema JSON estricto (`Type.OBJECT`) y maneja la cascada de modelos ante picos de demanda.
 
-### 4.5. Capa de Base de Datos (`server/database/`, `server/config/`)
-- **MySQL 8.x**: Base de datos relacional que almacena:
-  - `users`: Perfil biométrico, metas calóricas/macros, restricciones y notas.
-  - `meals`: Comidas registradas, imágenes Base64, audios Base64, transcripciones, macros, desglose de ingredientes y puntaje.
-  - `daily_summaries`: Consolidado del día, puntaje global (1-100), balance, fortalezas y áreas de mejora (UPSERT en base a `user_id` y `summary_date`).
-- **`server/config/db.ts`**: Pool de conexiones gestionado que optimiza la reutilización de sockets y controla la concurrencia.
+### 4.5. Capa de Almacenamiento e Infraestructura (`server/config/`)
+- **Google Sheets API v4**: Funciona como base de datos cloud documental en hojas estructuradas.
+- **Google Drive API v3**: Almacenamiento de archivos multimedia optimizado para CDN.
+- **`server/config/google.ts`**: Inicializa la autenticación con Service Account de Google Cloud a través de archivo `service-account.json` o variables de entorno.
 
 ---
 
@@ -175,20 +185,25 @@ sequenceDiagram
     participant Ctrl as mealController.ts
     participant Gemini as geminiService.ts
     participant GoogleAI as Google Gemini Flash (3.7 / 3.6)
-    participant DB as dbService.ts (MySQL)
+    participant Drive as googleDriveService.ts (Google Drive)
+    participant Sheets as googleSheetsService.ts (Google Sheets)
 
     Usuario->>UI: Captura foto y graba nota de voz
     UI->>API: Invoca analyzeMeal(imageBase64, audioBase64, mealType, notes)
     API->>Ctrl: POST /api/meals/analyze
-    Ctrl->>DB: getUser() (obtiene contexto base y metas)
+    Ctrl->>Sheets: getUser() (obtiene contexto base y metas)
     Ctrl->>Gemini: analyzeMealWithGemini({image, audio, user, mealType})
     Gemini->>GoogleAI: generateContent (InlineData + Audio + Schema JSON)
     GoogleAI-->>Gemini: Retorna JSON estricto con macros, plato y puntaje
     Gemini-->>Ctrl: Objeto GeminiMealAnalysisResponse
-    Ctrl->>Ctrl: Genera ID único y formatea fecha con formatToMysqlDateTime()
-    Ctrl->>DB: addMeal(newMeal) (INSERT en tabla meals)
-    Ctrl->>DB: getMeals(date) (recalcula totales de calorías y macros del día)
-    Ctrl->>DB: saveDailySummary(updatedSummary) (UPSERT en daily_summaries)
+    opt Si incluye imagen
+        Ctrl->>Drive: uploadMealImageToDrive(imageBase64)
+        Drive-->>Ctrl: Retorna directImageUrl y driveFileId
+    end
+    Ctrl->>Ctrl: Genera ID único y formatea timestamp local
+    Ctrl->>Sheets: addMeal(newMeal) (append a hoja Comidas)
+    Ctrl->>Sheets: getDailyNutritionalTotals(date) (calcula totales del día)
+    Ctrl->>Sheets: saveDailySummary(updatedSummary) (guarda en Resumenes_Diarios)
     Ctrl-->>API: 200 OK { success: true, meal, summary }
     API-->>UI: Comida registrada y resumen actualizado
     UI->>Usuario: Feedback visual, macros calculados y notificación de éxito
@@ -204,17 +219,17 @@ sequenceDiagram
     participant Ctrl as summaryController.ts
     participant Gemini as geminiService.ts
     participant GoogleAI as Google Gemini Flash
-    participant DB as dbService.ts (MySQL)
+    participant Sheets as googleSheetsService.ts (Google Sheets)
 
     Usuario->>Dashboard: Presiona "Evaluar Día con Gemini"
     Dashboard->>API: evaluateDailySummary(currentDate)
     API->>Ctrl: POST /api/daily-summary/evaluate
-    Ctrl->>DB: getUser() & getMeals(currentDate)
+    Ctrl->>Sheets: getUser() & getMealsForSummary(currentDate)
     Ctrl->>Gemini: evaluateDailySummaryWithGemini(user, meals, date)
     Gemini->>GoogleAI: generateContent (Prompts de adherencia y metas del día)
     GoogleAI-->>Gemini: Retorna puntaje diario (1-100), fortalezas y consejos
     Gemini-->>Ctrl: Objeto GeminiDailyScoreResponse
-    Ctrl->>DB: saveDailySummary(updatedSummary)
+    Ctrl->>Sheets: saveDailySummary(updatedSummary)
     Ctrl-->>API: 200 OK { success: true, summary }
     API-->>Dashboard: Resumen diario actualizado
     Dashboard->>Usuario: Visualización del puntaje global y confeti si el puntaje es alto

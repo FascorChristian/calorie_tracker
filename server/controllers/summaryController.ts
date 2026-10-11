@@ -5,7 +5,7 @@ import {
   saveDailySummary,
   getDailyNutritionalTotals,
   getMealsForSummary,
-} from '../services/dbService.js';
+} from '../services/googleSheetsService.js';
 import { evaluateDailySummaryWithGemini } from '../services/geminiService.js';
 import { formatToMysqlDateTime, getTodayString } from '../utils/dateUtils.js';
 import { DailySummary } from '../../shared/types.js';

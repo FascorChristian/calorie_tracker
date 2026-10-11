@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { getUser, updateUser } from '../services/dbService.js';
+import { getUser, updateUser } from '../services/googleSheetsService.js';
 
 export async function getProfileHandler(req: Request, res: Response) {
   try {

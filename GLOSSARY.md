@@ -1,4 +1,4 @@
-co# Glosario de Archivos e Interacciones de NutriVoice AI
+# Glosario de Archivos e Interacciones de NutriVoice AI
 
 Este glosario documenta cada archivo del proyecto, su responsabilidad dentro de la arquitectura, sus exportaciones clave, los módulos que consume y los módulos que dependen de él.
 
@@ -8,37 +8,40 @@ Este glosario documenta cada archivo del proyecto, su responsabilidad dentro de 
 
 | Archivo / Carpeta | Capa | Responsabilidad Principal |
 | :--- | :--- | :--- |
-| [`shared/types.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/shared/types.ts) | Shared | Contratos e interfaces de TypeScript compartidos entre Frontend y Backend. |
-| [`server/index.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/index.ts) | Backend Entry | Inicialización de Express, middlewares de tamaño, integración con Vite y arranque del servidor. |
-| [`server/config/db.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/config/db.ts) | Backend Infra | Creación y configuración del pool de conexiones MySQL (`mysql2/promise`). |
-| [`server/database/schema.sql`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/database/schema.sql) | Database | Esquema relacional DDL (tablas `users`, `meals`, `daily_summaries`) y datos iniciales. |
-| [`server/utils/dateUtils.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/utils/dateUtils.ts) | Backend Utils | Formateo estricto de fechas MySQL (`YYYY-MM-DD HH:MM:SS`) y fecha actual. |
-| [`server/prompts/geminiPrompts.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/prompts/geminiPrompts.ts) | Backend AI | Prompts de sistema e inyección de contexto biométrico para Gemini Flash. |
-| [`server/services/dbService.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/services/dbService.ts) | Backend Services | Consultas SQL parametrizadas y operaciones CRUD sobre la base de datos. |
-| [`server/services/geminiService.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/services/geminiService.ts) | Backend Services | Llamadas a la API de Gemini, gestión multimodal (foto + voz) y cascada de modelos. |
-| [`server/controllers/userController.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/controllers/userController.ts) | Backend Controllers | Manejo de solicitudes HTTP para lectura y actualización del perfil de usuario. |
-| [`server/controllers/mealController.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/controllers/mealController.ts) | Backend Controllers | Manejo de solicitudes HTTP para consultar, analizar con IA y borrar comidas. |
-| [`server/controllers/summaryController.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/controllers/summaryController.ts) | Backend Controllers | Manejo de solicitudes HTTP para obtener o evaluar el resumen nutricional diario. |
-| [`server/routes/index.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/routes/index.ts) | Backend Routing | Enrutador raíz `/api` que agrupa las sub-rutas y expone `/health`. |
-| [`server/routes/userRoutes.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/routes/userRoutes.ts) | Backend Routing | Endpoints de usuario (`GET /api/profile`, `POST /api/profile`). |
-| [`server/routes/mealRoutes.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/routes/mealRoutes.ts) | Backend Routing | Endpoints de comidas (`GET`, `POST /analyze`, `DELETE /:id`). |
-| [`server/routes/summaryRoutes.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server/routes/summaryRoutes.ts) | Backend Routing | Endpoints de resumen diario (`GET`, `POST /evaluate`). |
-| [`server.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/server.ts) | Backend Root Proxy | Wrapper de una sola línea que delega en `./server/index.js` para retrocompatibilidad. |
-| [`src/services/api.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/services/api.ts) | Frontend Services | Cliente HTTP tipado que encapsula todas las llamadas a la API REST. |
-| [`src/utils/nutritionCalculators.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/utils/nutritionCalculators.ts) | Frontend Utils | Fórmulas científicas de BMR (Harris-Benedict), TDEE y distribución de macronutrientes. |
-| [`src/components/index.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/components/index.ts) | Frontend UI | Barrel export para importar todos los componentes desde una sola ubicación. |
-| [`src/components/layout/Navbar.tsx`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/components/layout/Navbar.tsx) | Frontend UI | Barra de navegación superior con identidad visual y selector de fecha interactivo. |
-| [`src/components/dashboard/DailyDashboard.tsx`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/components/dashboard/DailyDashboard.tsx) | Frontend UI | Panel principal: barras de macros, progreso calórico, lista de comidas y feedback IA. |
-| [`src/components/meals/MultimodalMealModal.tsx`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/components/meals/MultimodalMealModal.tsx) | Frontend UI | Grabador de voz, captura por cámara/subida de foto, notas y envío al backend. |
-| [`src/components/meals/MealDetailModal.tsx`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/components/meals/MealDetailModal.tsx) | Frontend UI | Modal de vista detallada de una comida, ingredientes detectados y botón de borrado. |
-| [`src/components/profile/UserProfileModal.tsx`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/components/profile/UserProfileModal.tsx) | Frontend UI | Configuración biométrica, metas, preferencias dietarias y cálculo automático de calorías. |
-| [`src/App.tsx`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/App.tsx) | Frontend Root | Estado global de la aplicación, control de modales, fechas y notificaciones toast. |
-| [`src/main.tsx`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/main.tsx) | Frontend Entry | Renderizado de React en el contenedor `#root` del DOM. |
-| [`src/index.css`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/index.css) | Frontend Styles | Estilos globales, configuración de tipografía y directivas Tailwind CSS v4. |
-| [`src/types.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/src/types.ts) | Frontend Types | Re-exportación hacia `shared/types.ts` para compatibilidad transparente. |
-| [`package.json`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/package.json) | Config | Manifiesto del proyecto, scripts (`dev`, `build`, `lint`) y dependencias. |
-| [`tsconfig.json`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/tsconfig.json) | Config | Configuración del compilador TypeScript y resolución de módulos. |
-| [`vite.config.ts`](file:///c:/Users/Christian%20Diaz/Desktop/IA/calorie_tracker/vite.config.ts) | Config | Configuración de Vite, plugins de React y Tailwind CSS v4. |
+| [`shared/types.ts`](./shared/types.ts) | Shared | Contratos e interfaces de TypeScript compartidos entre Frontend y Backend. |
+| [`server/index.ts`](./server/index.ts) | Backend Entry | Inicialización de Express, verificación de Google Storage, middleware Vite y arranque. |
+| [`server/config/google.ts`](./server/config/google.ts) | Backend Infra | Autenticación con Google Cloud (Service Account) y clientes de Google Sheets & Drive. |
+| [`server/config/db.ts`](./server/config/db.ts) | Backend Infra | Conexión y Pool de MySQL (Legacy / Backup). |
+| [`server/database/schema.sql`](./server/database/schema.sql) | Database | Esquema relacional DDL (tablas `users`, `meals`, `daily_summaries`) y datos iniciales (Legacy). |
+| [`server/utils/dateUtils.ts`](./server/utils/dateUtils.ts) | Backend Utils | Formateo estricto de fechas y horas sincronizadas con la zona de Santiago (`America/Santiago`). |
+| [`server/prompts/geminiPrompts.ts`](./server/prompts/geminiPrompts.ts) | Backend AI | Prompts de sistema e inyección de contexto biométrico para Gemini Flash. |
+| [`server/services/googleSheetsService.ts`](./server/services/googleSheetsService.ts) | Backend Services | Persistencia completa y agregaciones en Google Sheets (`Comidas`, `Usuarios`, `Resumenes_Diarios`). |
+| [`server/services/googleDriveService.ts`](./server/services/googleDriveService.ts) | Backend Services | Subida de imágenes a Google Drive, asignación de permisos públicos y enlaces CDN. |
+| [`server/services/dbService.ts`](./server/services/dbService.ts) | Backend Services | Operaciones CRUD contra MySQL (Legacy / Respaldo). |
+| [`server/services/geminiService.ts`](./server/services/geminiService.ts) | Backend Services | Llamadas a la API de Gemini, gestión multimodal (foto + voz) y cascada de modelos. |
+| [`server/controllers/userController.ts`](./server/controllers/userController.ts) | Backend Controllers | Manejo de solicitudes HTTP para lectura y actualización del perfil en Google Sheets. |
+| [`server/controllers/mealController.ts`](./server/controllers/mealController.ts) | Backend Controllers | Manejo de solicitudes HTTP para consultar comidas, subir fotos a Drive, analizar con IA y borrar. |
+| [`server/controllers/summaryController.ts`](./server/controllers/summaryController.ts) | Backend Controllers | Manejo de solicitudes HTTP para obtener o evaluar el resumen nutricional en Google Sheets. |
+| [`server/routes/index.ts`](./server/routes/index.ts) | Backend Routing | Enrutador raíz `/api` que agrupa las sub-rutas y expone `/health`. |
+| [`server/routes/userRoutes.ts`](./server/routes/userRoutes.ts) | Backend Routing | Endpoints de usuario (`GET /api/profile`, `POST /api/profile`). |
+| [`server/routes/mealRoutes.ts`](./server/routes/mealRoutes.ts) | Backend Routing | Endpoints de comidas (`GET`, `POST /analyze`, `DELETE /:id`, `DELETE /purge-past`). |
+| [`server/routes/summaryRoutes.ts`](./server/routes/summaryRoutes.ts) | Backend Routing | Endpoints de resumen diario (`GET`, `POST /evaluate`). |
+| [`server.ts`](./server.ts) | Backend Root Proxy | Wrapper de una sola línea que delega en `./server/index.js` para retrocompatibilidad. |
+| [`src/services/api.ts`](./src/services/api.ts) | Frontend Services | Cliente HTTP tipado que encapsula todas las llamadas a la API REST. |
+| [`src/utils/nutritionCalculators.ts`](./src/utils/nutritionCalculators.ts) | Frontend Utils | Fórmulas científicas de BMR (Harris-Benedict), TDEE y distribución de macronutrientes. |
+| [`src/components/index.ts`](./src/components/index.ts) | Frontend UI | Barrel export para importar todos los componentes desde una sola ubicación. |
+| [`src/components/layout/Navbar.tsx`](./src/components/layout/Navbar.tsx) | Frontend UI | Barra de navegación superior con identidad visual y selector de fecha interactivo. |
+| [`src/components/dashboard/DailyDashboard.tsx`](./src/components/dashboard/DailyDashboard.tsx) | Frontend UI | Panel principal: barras de macros, progreso calórico, lista de comidas y feedback IA. |
+| [`src/components/meals/MultimodalMealModal.tsx`](./src/components/meals/MultimodalMealModal.tsx) | Frontend UI | Grabador de voz, captura por cámara/subida de foto, notas y envío al backend. |
+| [`src/components/meals/MealDetailModal.tsx`](./src/components/meals/MealDetailModal.tsx) | Frontend UI | Modal de vista detallada de una comida, ingredientes detectados y botón de borrado. |
+| [`src/components/profile/UserProfileModal.tsx`](./src/components/profile/UserProfileModal.tsx) | Frontend UI | Configuración biométrica, metas, preferencias dietarias y cálculo automático de calorías. |
+| [`src/App.tsx`](./src/App.tsx) | Frontend Root | Estado global de la aplicación, control de modales, fechas y notificaciones toast. |
+| [`src/main.tsx`](./src/main.tsx) | Frontend Entry | Renderizado de React en el contenedor `#root` del DOM. |
+| [`src/index.css`](./src/index.css) | Frontend Styles | Estilos globales, configuración de tipografía y directivas Tailwind CSS v4. |
+| [`src/types.ts`](./src/types.ts) | Frontend Types | Re-exportación hacia `shared/types.ts` para compatibilidad transparente. |
+| [`package.json`](./package.json) | Config | Manifiesto del proyecto, scripts (`dev`, `build`, `lint`) y dependencias. |
+| [`tsconfig.json`](./tsconfig.json) | Config | Configuración del compilador TypeScript y resolución de módulos. |
+| [`vite.config.ts`](./vite.config.ts) | Config | Configuración de Vite, plugins de React y Tailwind CSS v4. |
 
 ---
 
@@ -56,12 +59,39 @@ Este glosario documenta cada archivo del proyecto, su responsabilidad dentro de 
   - `GeminiMealAnalysisResponse`: Estructura JSON esperada de Gemini para comidas.
   - `GeminiDailyScoreResponse`: Estructura JSON esperada de Gemini para el resumen del día.
 - **Dependencias:** Ninguna (archivo puro de TypeScript).
-- **Consumido por:** `server/services/dbService.ts`, `server/services/geminiService.ts`, `server/prompts/geminiPrompts.ts`, `server/controllers/*`, `src/services/api.ts`, `src/components/*`, `src/App.tsx`.
+- **Consumido por:** `server/services/googleSheetsService.ts`, `server/services/dbService.ts`, `server/services/geminiService.ts`, `server/prompts/geminiPrompts.ts`, `server/controllers/*`, `src/services/api.ts`, `src/components/*`, `src/App.tsx`.
 
 ---
 
-### 2. `server/config/db.ts`
+### 2. `server/config/google.ts`
 - **Capa:** Backend / Infraestructura
+- **Propósito:** Inicializa el cliente autenticado de Google Cloud con Service Account (apoya `service-account.json`, variables `.env` o credenciales por defecto de la nube) y exporta los clientes tipados de Google Sheets (`v4`) y Google Drive (`v3`).
+- **Exporta:** `GOOGLE_SPREADSHEET_ID`, `GOOGLE_DRIVE_FOLDER_ID`, `getGoogleAuth()`, `getSheetsClient()`, `getDriveClient()`, `validateGoogleConfig()`.
+- **Dependencias:** `googleapis`, `dotenv`, `fs`, `path`.
+- **Consumido por:** `server/services/googleSheetsService.ts`, `server/services/googleDriveService.ts`, `server/index.ts`.
+
+---
+
+### 3. `server/services/googleSheetsService.ts`
+- **Capa:** Backend / Persistencia
+- **Propósito:** Reemplaza el almacenamiento SQL por Google Sheets. Mapea las colecciones a pestañas (`Comidas`, `Usuarios`, `Resumenes_Diarios`), auto-inicializa pestañas y encabezados, y ejecuta operaciones CRUD y agregaciones numéricas seguras.
+- **Exporta:** `initializeGoogleSheets()`, `getUser(userId)`, `updateUser(user, userId)`, `getMeals(date, userId, includeAudio)`, `getMealById(id)`, `getMealsForSummary(date, userId)`, `addMeal(meal)`, `deleteMeal(id)`, `purgePastMeals(beforeDate, userId)`, `getDailySummary(date, userId)`, `saveDailySummary(summary)`, `getDailyNutritionalTotals(date, userId)`.
+- **Dependencias:** `server/config/google.ts`, `server/utils/dateUtils.ts`, `shared/types.ts`.
+- **Consumido por:** `server/controllers/userController.ts`, `server/controllers/mealController.ts`, `server/controllers/summaryController.ts`, `server/index.ts`.
+
+---
+
+### 4. `server/services/googleDriveService.ts`
+- **Capa:** Backend / Almacenamiento Multimedia
+- **Propósito:** Gestiona la subida de fotografías de comidas decodificando imágenes en Base64 a buffers binarios, cargándolos en una carpeta designada de Google Drive, configurando permisos públicos de lectura y generando URLs estables de visualización de alta velocidad vía CDN (`https://lh3.googleusercontent.com/d/${fileId}`).
+- **Exporta:** `uploadMealImageToDrive(options)`, `deleteImageFromDrive(fileId)`.
+- **Dependencias:** `server/config/google.ts`, `stream`.
+- **Consumido por:** `server/controllers/mealController.ts`.
+
+---
+
+### 5. `server/config/db.ts`
+- **Capa:** Backend / Infraestructura (Legacy / Respaldo)
 - **Propósito:** Configura y exporta el pool de conexiones MySQL gestionado (`mysql2/promise`) a partir de las variables de entorno (`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT`).
 - **Exporta:** `pool` (Instancia de `mysql.Pool`).
 - **Dependencias:** `mysql2/promise`, `dotenv`.

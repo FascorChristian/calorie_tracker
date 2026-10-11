@@ -36,6 +36,7 @@ export interface Meal {
   time: string; // HH:mm
   mealType: 'desayuno' | 'almuerzo' | 'cena' | 'snack';
   imageUrl?: string;
+  driveFileId?: string;
   audioDataUrl?: string;
   audioDurationSeconds?: number;
   audioTranscript?: string;

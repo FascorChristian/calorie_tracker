@@ -35,7 +35,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onPurgeSuccess,
 }) => {
   const [formData, setFormData] = useState<Partial<UserProfile>>({
-    name: 'Christian Díaz',
+    name: 'Usuario',
     age: 28,
     gender: 'masculino',
     weightKg: 78,

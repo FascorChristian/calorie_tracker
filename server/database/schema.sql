@@ -88,7 +88,7 @@ INSERT INTO users (
     activity_level, goal, target_calories, target_protein_g, 
     target_carbs_g, target_fat_g, allergies, dietary_preferences, notes
 ) VALUES (
-    'user_default', 'Christian Díaz', 28, 'masculino', 78.00, 178.00,
+    'user_default', 'Usuario Demo', 28, 'masculino', 78.00, 178.00,
     'moderado', 'deficit', 2150, 160, 200, 65,
     '["Lactosa moderada"]', '["Alto en proteína", "Comida real"]',
     'Entrenamiento de fuerza 4x por semana. Buscando definición muscular preservando masa magra.'
