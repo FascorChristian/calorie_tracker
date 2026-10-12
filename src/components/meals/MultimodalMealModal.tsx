@@ -82,6 +82,10 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   return new Blob([view], { type: 'audio/wav' });
 }
 
+function generateRequestId(): string {
+  return 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+}
+
 export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   isOpen,
   onClose,
@@ -123,6 +127,35 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const isStartingAudioRef = useRef<boolean>(false);
 
+  // Idempotency & Mobile Screen-Lock Resilience Refs
+  const clientRequestIdRef = useRef<string>(generateRequestId());
+  const isAnalyzingRef = useRef<boolean>(false);
+  const wakeLockRef = useRef<any>(null);
+
+  const requestWakeLock = async () => {
+    try {
+      if ('wakeLock' in navigator && (navigator as any).wakeLock?.request) {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        wakeLockRef.current?.addEventListener('release', () => {
+          wakeLockRef.current = null;
+        });
+      }
+    } catch (err) {
+      console.warn('Screen Wake Lock no disponible o no permitido:', err);
+    }
+  };
+
+  const releaseWakeLock = async () => {
+    try {
+      if (wakeLockRef.current) {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      }
+    } catch (err) {
+      console.warn('Error al liberar Screen Wake Lock:', err);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) {
       stopCamera();
@@ -138,11 +171,43 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
     return () => {
       stopCamera();
       stopRecording();
+      releaseWakeLock();
       if (audioUrl) {
         URL.revokeObjectURL(audioUrl);
       }
     };
   }, []);
+
+  // Al desbloquear pantalla del celular (o volver a la pestaña), verificar si la comida terminó de procesarse
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && isAnalyzingRef.current) {
+        const reqId = clientRequestIdRef.current;
+        try {
+          setAnalysisStep('Reconectando y verificando estado del registro...');
+          const res = await fetch(`/api/meals/status/${reqId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'completed' && data.meal) {
+              setIsAnalyzing(false);
+              isAnalyzingRef.current = false;
+              releaseWakeLock();
+              clientRequestIdRef.current = generateRequestId();
+              onMealCreated(data.meal);
+              onClose();
+            }
+          }
+        } catch (err) {
+          console.warn('Error comprobando estado tras visibilidad activa:', err);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [onMealCreated, onClose]);
 
   // Asegura que el elemento <audio> cargue inmediatamente el nuevo audio grabado
   useEffect(() => {
@@ -183,6 +248,9 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
     setTextNotes('');
     setErrorMessage(null);
     setIsAnalyzing(false);
+    isAnalyzingRef.current = false;
+    releaseWakeLock();
+    clientRequestIdRef.current = generateRequestId();
   };
 
   // ==========================================
@@ -558,6 +626,42 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
   // ==========================================
   // SUBMIT MULTIMODAL TO BACKEND / GEMINI
   // ==========================================
+  const pollForMealStatus = async (
+    reqId: string,
+    maxAttempts = 15,
+    intervalMs = 2000
+  ): Promise<Meal | null> => {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await fetch(`/api/meals/status/${reqId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === 'completed' && data.meal) {
+            return data.meal;
+          }
+          if (data.status === 'error') {
+            throw new Error(data.error || 'Error al procesar la comida');
+          }
+          if (data.status === 'processing') {
+            setAnalysisStep(`Procesando en segundo plano (${attempt * 2}s)...`);
+          }
+        }
+      } catch (err: any) {
+        if (
+          err.message &&
+          !err.message.includes('fetch') &&
+          !err.message.includes('network') &&
+          !err.message.includes('Load failed') &&
+          !err.message.includes('aborted')
+        ) {
+          throw err;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    return null;
+  };
+
   const handleAnalyzeAndSave = async () => {
     if (!imageSrc && !audioBase64 && !textNotes.trim()) {
       setErrorMessage('Por favor toma una foto, graba un audio o escribe la descripción del plato.');
@@ -565,7 +669,13 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
     }
 
     setIsAnalyzing(true);
+    isAnalyzingRef.current = true;
     setErrorMessage(null);
+
+    // Activar Screen Wake Lock para evitar que la pantalla se apague mientras se analiza
+    await requestWakeLock();
+
+    const currentRequestId = clientRequestIdRef.current;
 
     const steps = [
       'Extrayendo datos de la imagen y nota de voz...',
@@ -586,6 +696,7 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          clientRequestId: currentRequestId,
           imageBase64: imageSrc || undefined,
           imageMimeType: 'image/jpeg',
           audioBase64: audioBase64 || undefined,
@@ -608,15 +719,45 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
 
       const data = await response.json();
       if (data.meal) {
+        clientRequestIdRef.current = generateRequestId();
         onMealCreated(data.meal);
         onClose();
       }
     } catch (err: any) {
       clearInterval(stepInterval);
-      console.error('Error analyzing meal:', err);
-      setErrorMessage(err.message || 'Error al conectar con el servidor');
+      console.warn('Fallo de conexión o suspensión de pantalla durante análisis:', err);
+
+      const isNetworkOrScreenLockError =
+        err.name === 'TypeError' ||
+        err.name === 'AbortError' ||
+        err.message?.toLowerCase().includes('load failed') ||
+        err.message?.toLowerCase().includes('failed to fetch') ||
+        err.message?.toLowerCase().includes('network') ||
+        err.message?.toLowerCase().includes('aborted');
+
+      if (isNetworkOrScreenLockError) {
+        setAnalysisStep('La pantalla se suspendió. Verificando procesamiento en segundo plano...');
+        try {
+          const recoveredMeal = await pollForMealStatus(currentRequestId);
+          if (recoveredMeal) {
+            clientRequestIdRef.current = generateRequestId();
+            onMealCreated(recoveredMeal);
+            onClose();
+            return;
+          }
+        } catch (pollErr: any) {
+          setErrorMessage(pollErr.message || 'Error al procesar comida.');
+          return;
+        }
+      }
+
+      setErrorMessage(
+        err.message || 'Error al conectar con el servidor. Tus datos no se perdieron, puedes reintentar sin duplicar.'
+      );
     } finally {
       setIsAnalyzing(false);
+      isAnalyzingRef.current = false;
+      releaseWakeLock();
     }
   };
 

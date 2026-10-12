@@ -39,9 +39,88 @@ export async function getMealByIdHandler(req: Request, res: Response) {
   }
 }
 
+interface AnalysisResult {
+  meal: Meal;
+  summary: DailySummary;
+}
+
+interface InFlightRequest {
+  status: 'processing' | 'completed' | 'error';
+  promise?: Promise<AnalysisResult>;
+  result?: AnalysisResult;
+  error?: string;
+  createdAt: number;
+}
+
+// Map en memoria para solicitudes de análisis en curso y completadas recientemente (TTL: 15 min)
+const activeRequests = new Map<string, InFlightRequest>();
+
+// Limpiar solicitudes antiguas cada 10 minutos
+setInterval(() => {
+  const now = Date.now();
+  const maxAge = 15 * 60 * 1000;
+  for (const [key, req] of activeRequests.entries()) {
+    if (now - req.createdAt > maxAge) {
+      activeRequests.delete(key);
+    }
+  }
+}, 10 * 60 * 1000).unref();
+
+export async function getMealStatusHandler(req: Request, res: Response) {
+  try {
+    const clientRequestId = req.params.clientRequestId;
+    if (!clientRequestId) {
+      return res.status(400).json({ error: 'clientRequestId es requerido' });
+    }
+
+    // 1. Revisar caché en memoria
+    const cached = activeRequests.get(clientRequestId);
+    if (cached) {
+      if (cached.status === 'completed' && cached.result) {
+        return res.json({
+          status: 'completed',
+          meal: cached.result.meal,
+          summary: cached.result.summary,
+        });
+      }
+      if (cached.status === 'processing') {
+        return res.json({
+          status: 'processing',
+        });
+      }
+      if (cached.status === 'error') {
+        return res.json({
+          status: 'error',
+          error: cached.error || 'Error al procesar comida',
+        });
+      }
+    }
+
+    // 2. Revisar si ya quedó persistido en Google Sheets
+    const mealId = `meal_${clientRequestId}`;
+    const meal = await getMealById(mealId);
+    if (meal) {
+      const summary = await getDailySummary(meal.date).catch(() => null);
+      return res.json({
+        status: 'completed',
+        meal,
+        summary,
+      });
+    }
+
+    return res.json({
+      status: 'not_found',
+    });
+  } catch (err: any) {
+    console.error('Error in getMealStatusHandler:', err);
+    return res.status(500).json({ error: err.message || 'Error al consultar estado' });
+  }
+}
+
 export async function analyzeMealHandler(req: Request, res: Response) {
   try {
     const {
+      clientRequestId: rawRequestId,
       imageBase64,
       imageMimeType,
       audioBase64,
@@ -54,106 +133,199 @@ export async function analyzeMealHandler(req: Request, res: Response) {
       time,
     } = req.body;
 
+    const clientRequestId = rawRequestId && typeof rawRequestId === 'string' && rawRequestId.trim()
+      ? rawRequestId.trim()
+      : undefined;
+
+    // Idempotencia: Si ya hay una petición con este clientRequestId en memoria
+    if (clientRequestId && activeRequests.has(clientRequestId)) {
+      const existing = activeRequests.get(clientRequestId)!;
+      if (existing.status === 'completed' && existing.result) {
+        return res.json({
+          success: true,
+          meal: existing.result.meal,
+          summary: existing.result.summary,
+        });
+      }
+      if (existing.status === 'processing' && existing.promise) {
+        try {
+          const result = await existing.promise;
+          return res.json({
+            success: true,
+            meal: result.meal,
+            summary: result.summary,
+          });
+        } catch (err: any) {
+          return res.status(500).json({
+            error: err.message || 'Error al procesar con Gemini',
+          });
+        }
+      }
+    }
+
+    // Idempotencia: Si ya quedó guardada previamente en Google Sheets
+    if (clientRequestId) {
+      const mealId = `meal_${clientRequestId}`;
+      try {
+        const existingMeal = await getMealById(mealId);
+        if (existingMeal) {
+          const existingSummary = await getDailySummary(existingMeal.date).catch(() => null);
+          return res.json({
+            success: true,
+            meal: existingMeal,
+            summary: existingSummary,
+          });
+        }
+      } catch (checkErr) {
+        console.warn('Aviso verificando comida existente en Google Sheets:', checkErr);
+      }
+    }
+
     if (!imageBase64 && !audioBase64 && !notes) {
       return res.status(400).json({
         error: 'Se requiere al menos una imagen, una nota de voz o descripción.',
       });
     }
 
-    const user = await getUser();
+    const mealId = clientRequestId
+      ? `meal_${clientRequestId}`
+      : 'meal_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
-    // Call Gemini 3.7 / 3.6 Flash multimodal
-    const analysis = await analyzeMealWithGemini({
-      imageBase64,
-      imageMimeType,
-      audioBase64,
-      audioMimeType,
-      audioTranscript,
-      mealType,
-      user,
-      notes,
-    });
+    const runAnalysis = async (): Promise<AnalysisResult> => {
+      const user = await getUser();
 
-    // Subir foto a Google Drive si se incluyó una imagen
-    let driveImageUrl: string | undefined = undefined;
-    let driveFileId: string | undefined = undefined;
+      // Call Gemini 3.7 / 3.6 Flash multimodal
+      const analysis = await analyzeMealWithGemini({
+        imageBase64,
+        imageMimeType,
+        audioBase64,
+        audioMimeType,
+        audioTranscript,
+        mealType,
+        user,
+        notes,
+      });
 
-    if (imageBase64) {
-      try {
-        const uploadResult = await uploadMealImageToDrive({
-          imageBase64,
-          fileName: `comida_${Date.now()}_${mealType}.jpg`,
-          mimeType: imageMimeType || 'image/jpeg',
-        });
-        driveImageUrl = uploadResult.directImageUrl;
-        driveFileId = uploadResult.fileId;
-      } catch (driveErr: any) {
-        console.warn('Aviso: No se pudo subir imagen a Google Drive, usando respaldo:', driveErr?.message || driveErr);
-        // Respaldo para que la app no falle si Drive no está configurado
-        driveImageUrl = imageBase64;
+      // Subir foto a Google Drive si se incluyó una imagen
+      let driveImageUrl: string | undefined = undefined;
+      let driveFileId: string | undefined = undefined;
+
+      if (imageBase64) {
+        try {
+          const uploadResult = await uploadMealImageToDrive({
+            imageBase64,
+            fileName: clientRequestId ? `comida_${clientRequestId}_${mealType}.jpg` : `comida_${Date.now()}_${mealType}.jpg`,
+            mimeType: imageMimeType || 'image/jpeg',
+          });
+          driveImageUrl = uploadResult.directImageUrl;
+          driveFileId = uploadResult.fileId;
+        } catch (driveErr: any) {
+          console.warn('Aviso: No se pudo subir imagen a Google Drive, usando respaldo:', driveErr?.message || driveErr);
+          // Respaldo para que la app no falle si Drive no está configurado
+          driveImageUrl = imageBase64;
+        }
       }
+
+      // Zona horaria de Santiago (Chile) si no se especifica explícitamente
+      const mealDate = date || getTodayString();
+      const mealTime = time || getSantiagoTimeString();
+
+      const newMeal: Meal = {
+        id: mealId,
+        userId: user.id,
+        date: mealDate,
+        time: mealTime,
+        mealType: mealType,
+        imageUrl: driveImageUrl,
+        driveFileId: driveFileId,
+        audioDataUrl: audioBase64,
+        audioDurationSeconds: audioDurationSeconds || 0,
+        audioTranscript: analysis.detalles_audio,
+        nombre_plato: analysis.nombre_plato,
+        calorias_estimadas: analysis.calorias_estimadas,
+        macros: analysis.macros,
+        puntaje_plato: analysis.puntaje_plato,
+        feedback_breve: analysis.feedback_breve,
+        ingredientes_detectados: analysis.ingredientes_detectados,
+        detalles_audio: analysis.detalles_audio,
+        createdAt: formatToMysqlDateTime(),
+      };
+
+      const savedMeal = await addMeal(newMeal);
+
+      // Auto-update Daily Summary totals en Google Sheets
+      const totals = await getDailyNutritionalTotals(mealDate, user.id);
+
+      const existingSummary = await getDailySummary(mealDate);
+      const updatedSummary: DailySummary = {
+        date: mealDate,
+        userId: user.id,
+        totalCalories: totals.totalCalories,
+        totalProtein: totals.totalProtein,
+        totalCarbs: totals.totalCarbs,
+        totalFat: totals.totalFat,
+        puntaje_diario: existingSummary?.puntaje_diario || Math.min(100, Math.round((savedMeal.puntaje_plato * 10))),
+        consejo_diario: existingSummary?.consejo_diario || 'Has añadido un nuevo registro multimodal. Puedes recalcular tu puntaje integral del día cuando desees.',
+        balance_nutricional: existingSummary?.balance_nutricional || 'En progreso',
+        puntos_fuertes: existingSummary?.puntos_fuertes || [
+          `Registrado ${savedMeal.nombre_plato} con éxito.`,
+        ],
+        areas_de_mejora: existingSummary?.areas_de_mejora || [
+          `Mantén el seguimiento de hidratación y próximas comidas.`,
+        ],
+        mealsCount: totals.mealsCount,
+        updatedAt: formatToMysqlDateTime(),
+      };
+      await saveDailySummary(updatedSummary);
+
+      return {
+        meal: savedMeal,
+        summary: updatedSummary,
+      };
+    };
+
+    if (clientRequestId) {
+      const promise = runAnalysis();
+      activeRequests.set(clientRequestId, {
+        status: 'processing',
+        promise,
+        createdAt: Date.now(),
+      });
+
+      try {
+        const result = await promise;
+        activeRequests.set(clientRequestId, {
+          status: 'completed',
+          result,
+          createdAt: Date.now(),
+        });
+        return res.json({
+          success: true,
+          meal: result.meal,
+          summary: result.summary,
+        });
+      } catch (err: any) {
+        activeRequests.set(clientRequestId, {
+          status: 'error',
+          error: err.message || 'Error al procesar con Gemini',
+          createdAt: Date.now(),
+        });
+        console.error('Error in /api/meals/analyze:', err);
+        return res.status(500).json({
+          error: err.message || 'Error al procesar con Gemini',
+        });
+      }
+    } else {
+      const result = await runAnalysis();
+      return res.json({
+        success: true,
+        meal: result.meal,
+        summary: result.summary,
+      });
     }
-
-    // Zona horaria de Santiago (Chile) si no se especifica explícitamente
-    const mealDate = date || getTodayString();
-    const mealTime = time || getSantiagoTimeString();
-
-    const newMeal: Meal = {
-      id: 'meal_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      userId: user.id,
-      date: mealDate,
-      time: mealTime,
-      mealType: mealType,
-      imageUrl: driveImageUrl,
-      driveFileId: driveFileId,
-      audioDataUrl: audioBase64,
-      audioDurationSeconds: audioDurationSeconds || 0,
-      audioTranscript: analysis.detalles_audio,
-      nombre_plato: analysis.nombre_plato,
-      calorias_estimadas: analysis.calorias_estimadas,
-      macros: analysis.macros,
-      puntaje_plato: analysis.puntaje_plato,
-      feedback_breve: analysis.feedback_breve,
-      ingredientes_detectados: analysis.ingredientes_detectados,
-      detalles_audio: analysis.detalles_audio,
-      createdAt: formatToMysqlDateTime(),
-    };
-
-    const savedMeal = await addMeal(newMeal);
-
-    // Auto-update Daily Summary totals en Google Sheets
-    const totals = await getDailyNutritionalTotals(mealDate, user.id);
-
-    const existingSummary = await getDailySummary(mealDate);
-    const updatedSummary: DailySummary = {
-      date: mealDate,
-      userId: user.id,
-      totalCalories: totals.totalCalories,
-      totalProtein: totals.totalProtein,
-      totalCarbs: totals.totalCarbs,
-      totalFat: totals.totalFat,
-      puntaje_diario: existingSummary?.puntaje_diario || Math.min(100, Math.round((savedMeal.puntaje_plato * 10))),
-      consejo_diario: existingSummary?.consejo_diario || 'Has añadido un nuevo registro multimodal. Puedes recalcular tu puntaje integral del día cuando desees.',
-      balance_nutricional: existingSummary?.balance_nutricional || 'En progreso',
-      puntos_fuertes: existingSummary?.puntos_fuertes || [
-        `Registrado ${savedMeal.nombre_plato} con éxito.`,
-      ],
-      areas_de_mejora: existingSummary?.areas_de_mejora || [
-        `Mantén el seguimiento de hidratación y próximas comidas.`,
-      ],
-      mealsCount: totals.mealsCount,
-      updatedAt: formatToMysqlDateTime(),
-    };
-    await saveDailySummary(updatedSummary);
-
-    res.json({
-      success: true,
-      meal: savedMeal,
-      summary: updatedSummary,
-    });
   } catch (err: any) {
     console.error('Error in /api/meals/analyze:', err);
-    res.status(500).json({
+    return res.status(500).json({
       error: err.message || 'Error al procesar con Gemini',
     });
   }

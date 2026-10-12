@@ -67,6 +67,7 @@ export interface DailySummary {
 }
 
 export interface MultimodalAnalysisRequest {
+  clientRequestId?: string;
   imageBase64?: string;
   imageMimeType?: string;
   audioBase64?: string;

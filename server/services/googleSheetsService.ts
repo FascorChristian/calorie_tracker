@@ -494,12 +494,30 @@ export async function addMeal(meal: Meal): Promise<Meal> {
     formattedCreatedAt,
   ];
 
-  await sheets.spreadsheets.values.append({
+  // Si ya existe una comida con ese ID, actualizar la fila existente para prevenir duplicados
+  const existingRowsRes = await sheets.spreadsheets.values.get({
     spreadsheetId: GOOGLE_SPREADSHEET_ID,
-    range: `${SHEETS_NAMES.MEALS}!A:T`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [row] },
+    range: `${SHEETS_NAMES.MEALS}!A2:A`,
   });
+  const existingRows = existingRowsRes.data.values || [];
+  const existingIndex = existingRows.findIndex((r) => r[0] === meal.id);
+
+  if (existingIndex !== -1) {
+    const sheetRowNumber = existingIndex + 2;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: GOOGLE_SPREADSHEET_ID,
+      range: `${SHEETS_NAMES.MEALS}!A${sheetRowNumber}:T${sheetRowNumber}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [row] },
+    });
+  } else {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: GOOGLE_SPREADSHEET_ID,
+      range: `${SHEETS_NAMES.MEALS}!A:T`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [row] },
+    });
+  }
 
   return {
     ...meal,

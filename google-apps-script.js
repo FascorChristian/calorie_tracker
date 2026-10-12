@@ -430,6 +430,17 @@ function handleAddMeal(meal) {
     createdAt
   ];
 
+  // Si ya existe una comida con ese ID, actualizar la fila existente para prevenir duplicados
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(meal.id)) {
+      row[19] = rows[i][19] || createdAt; // Mantener fecha de creación original
+      sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
+      meal.createdAt = row[19];
+      return meal;
+    }
+  }
+
   sheet.appendRow(row);
   meal.createdAt = createdAt;
   return meal;
