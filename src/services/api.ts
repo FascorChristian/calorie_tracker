@@ -3,6 +3,7 @@ import {
   Meal,
   DailySummary,
   MultimodalAnalysisRequest,
+  QueueStatusReport,
 } from '../../shared/types.js';
 
 /**
@@ -141,6 +142,29 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Error al evaluar el día con Gemini');
+    }
+    return res.json();
+  },
+
+  /**
+   * Obtiene el estado en tiempo real de la cola de IA (RPM, modelo, tareas en espera).
+   */
+  async getQueueStatus(): Promise<QueueStatusReport> {
+    const res = await fetch('/api/queue/status');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Error al obtener estado de la cola');
+    }
+    return res.json();
+  },
+
+  /**
+   * Ping liviano para despertar el servidor en Render si está en modo suspensión.
+   */
+  async pingServer(): Promise<{ status: string; timestamp: string; uptimeSeconds: number }> {
+    const res = await fetch('/api/queue/ping');
+    if (!res.ok) {
+      throw new Error('Servidor no responde');
     }
     return res.json();
   },

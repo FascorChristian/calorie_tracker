@@ -643,7 +643,10 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
             throw new Error(data.error || 'Error al procesar la comida');
           }
           if (data.status === 'processing') {
-            setAnalysisStep(`Procesando en segundo plano (${attempt * 2}s)...`);
+            setAnalysisStep(
+              data.queueStatus ||
+                `En cola de procesamiento IA (${data.queuePosition ? `Posición #${data.queuePosition}` : `${attempt * 2}s`})...`
+            );
           }
         }
       } catch (err: any) {
@@ -680,7 +683,7 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
     const steps = [
       'Extrayendo datos de la imagen y nota de voz...',
       'Inyectando contexto biométrico y metas...',
-      'Consultando modelo multimodal Gemini 3.7 Flash...',
+      'Encolando y consultando Gemini 3.1 Flash Lite...',
       'Calculando macros y puntaje del 1 al 10...',
     ];
 

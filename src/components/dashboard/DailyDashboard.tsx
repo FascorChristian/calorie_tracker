@@ -231,7 +231,7 @@ export const DailyDashboard: React.FC<DailyDashboardProps> = ({
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
                   <Sparkles className="w-3.5 h-3.5" />
-                  Evaluación Holística Diaria (Gemini 3.7)
+                  Evaluación Holística Diaria (Gemini 3.1 Flash Lite)
                 </span>
                 {dailySummary?.balance_nutricional && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-semibold">

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { userRoutes } from './userRoutes.js';
 import { mealRoutes } from './mealRoutes.js';
 import { summaryRoutes } from './summaryRoutes.js';
+import { queueRoutes } from './queueRoutes.js';
 
 export const apiRouter = Router();
 
@@ -14,4 +15,6 @@ apiRouter.get('/health', (req, res) => {
 apiRouter.use('/profile', userRoutes);
 apiRouter.use('/meals', mealRoutes);
 apiRouter.use('/daily-summary', summaryRoutes);
+apiRouter.use('/queue', queueRoutes);
+
 

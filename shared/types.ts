@@ -103,3 +103,52 @@ export interface GeminiDailyScoreResponse {
   areas_de_mejora: string[];
 }
 
+export type QueueJobStatus =
+  | 'queued'
+  | 'processing'
+  | 'waiting_quota_backoff'
+  | 'retrying_high_demand'
+  | 'completed'
+  | 'failed';
+
+export interface QueueJobInfo {
+  id: string;
+  type: 'meal_analysis' | 'daily_summary';
+  title: string;
+  clientRequestId?: string;
+  status: QueueJobStatus;
+  statusMessage: string;
+  model: string;
+  attempt: number;
+  elapsedMs: number;
+  positionInQueue?: number;
+}
+
+export interface QueueRecentJob {
+  id: string;
+  type: string;
+  title: string;
+  status: 'completed' | 'failed';
+  model: string;
+  durationMs: number;
+  completedAt: string;
+}
+
+export interface QueueStatusReport {
+  isProcessing: boolean;
+  queueLength: number;
+  currentJob: QueueJobInfo | null;
+  waitingJobs: QueueJobInfo[];
+  recentJobs: QueueRecentJob[];
+  metrics: {
+    currentRpm: number;
+    maxPacedRpm: number;
+    activeModel: string;
+    fallbackModel: string;
+    totalProcessed: number;
+    serverUptimeSeconds: number;
+    cooldownRemainingSeconds?: number;
+  };
+}
+
+

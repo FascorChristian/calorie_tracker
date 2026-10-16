@@ -7,6 +7,7 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
+  Activity,
 } from 'lucide-react';
 import { UserProfile } from '../../../shared/types.js';
 
@@ -16,6 +17,7 @@ interface NavbarProps {
   user: UserProfile | null;
   onOpenProfile: () => void;
   onOpenNewMeal: () => void;
+  onOpenQueue?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -24,6 +26,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   user,
   onOpenProfile,
   onOpenNewMeal,
+  onOpenQueue,
 }) => {
   const getTodayString = () => {
     const now = new Date();
@@ -84,13 +87,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               </div>
               <p className="text-xs text-stone-400 hidden sm:block">
-                Foto + Voz nativa con Gemini 3.7
+                Foto + Voz con Gemini 3.1 Flash Lite
               </p>
             </div>
           </div>
 
-          {/* Quick Action on Mobile */}
+          {/* Quick Actions on Mobile */}
           <div className="flex items-center gap-1.5 sm:hidden">
+            {onOpenQueue && (
+              <button
+                type="button"
+                onClick={onOpenQueue}
+                className="p-2 rounded-lg bg-stone-900 border border-stone-800 text-stone-300 hover:text-emerald-400 text-xs"
+                title="Cola de IA"
+              >
+                <Activity className="w-4 h-4 text-teal-400" />
+              </button>
+            )}
             <button
               onClick={onOpenProfile}
               className="p-2 rounded-lg bg-stone-900 border border-stone-700 text-stone-300 hover:text-emerald-400 text-xs"
@@ -137,6 +150,19 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right: Actions (Desktop) */}
         <div className="hidden sm:flex items-center gap-2.5">
+          {/* Queue Monitor Button */}
+          {onOpenQueue && (
+            <button
+              type="button"
+              onClick={onOpenQueue}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-stone-900/90 hover:bg-stone-800 border border-stone-800 hover:border-teal-500/40 text-xs font-semibold text-stone-300 hover:text-teal-300 transition-all cursor-pointer shadow-sm"
+              title="Monitorear cola de procesamiento IA y límites RPM"
+            >
+              <Activity className="w-3.5 h-3.5 text-teal-400" />
+              <span>Cola IA</span>
+            </button>
+          )}
+
           {/* User Profile */}
           <button
             onClick={onOpenProfile}

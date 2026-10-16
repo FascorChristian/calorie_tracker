@@ -5,10 +5,11 @@ import {
   UserProfileModal,
   MultimodalMealModal,
   MealDetailModal,
+  QueueViewer,
 } from './components/index.js';
 import { UserProfile, Meal, DailySummary } from '../shared/types.js';
 import { api } from './services/api.js';
-import { Sparkles, RefreshCw } from 'lucide-react';
+import { Sparkles, RefreshCw, Server } from 'lucide-react';
 
 function getTodayString(): string {
   try {
@@ -44,7 +45,9 @@ export default function App() {
   // Modals state
   const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
   const [isNewMealOpen, setIsNewMealOpen] = useState<boolean>(false);
+  const [isQueueOpen, setIsQueueOpen] = useState<boolean>(false);
   const [selectedMeal, setSelectedMeal] = useState<Meal | null>(null);
+  const [isServerWaking, setIsServerWaking] = useState<boolean>(false);
 
   // Toast / notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -66,6 +69,10 @@ export default function App() {
 
   const fetchInitialData = async () => {
     setIsLoading(true);
+    const wakeTimer = setTimeout(() => {
+      setIsServerWaking(true);
+    }, 2500);
+
     try {
       // 1. Fetch User Profile
       const userData = await api.getProfile().catch((err) => {
@@ -81,6 +88,8 @@ export default function App() {
     } catch (err) {
       console.error('Error fetching initial data:', err);
     } finally {
+      clearTimeout(wakeTimer);
+      setIsServerWaking(false);
       setIsLoading(false);
     }
   };
@@ -162,6 +171,14 @@ export default function App() {
         </div>
       )}
 
+      {/* Render cold-start wake-up notification */}
+      {isServerWaking && (
+        <div className="bg-gradient-to-r from-amber-600/90 via-amber-500/90 to-yellow-600/90 text-stone-950 px-4 py-2 text-xs font-semibold flex items-center justify-center gap-2 shadow-md">
+          <Server className="w-4 h-4 animate-pulse" />
+          <span>Despertando servidor en Render (tras período de inactividad, puede tomar unos segundos)...</span>
+        </div>
+      )}
+
       {/* Main Navigation */}
       <Navbar
         currentDate={currentDate}
@@ -169,6 +186,7 @@ export default function App() {
         user={user}
         onOpenProfile={() => setIsProfileOpen(true)}
         onOpenNewMeal={() => setIsNewMealOpen(true)}
+        onOpenQueue={() => setIsQueueOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -177,7 +195,9 @@ export default function App() {
           <div className="flex flex-col items-center justify-center py-24 space-y-4">
             <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
             <p className="text-xs font-semibold text-stone-400">
-              Cargando NutriVoice AI y contexto biométrico...
+              {isServerWaking
+                ? 'Conectando con el servidor en Render...'
+                : 'Cargando NutriVoice AI y contexto biométrico...'}
             </p>
           </div>
         ) : (
@@ -200,9 +220,9 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="font-bold text-stone-400">NutriVoice AI</span>
             <span>•</span>
-            <span>Tracker Calórico Multimodal Inteligente (Gemini 3.7 Flash)</span>
+            <span>Tracker Calórico Multimodal Inteligente (Gemini 3.1 Flash Lite)</span>
           </div>
-          <span className="text-stone-600">Registro por Foto & Voz • IA Nutricional</span>
+          <span className="text-stone-600">Registro por Foto & Voz • Cola con Regulación de RPM</span>
         </div>
       </footer>
 
@@ -230,6 +250,13 @@ export default function App() {
         meal={selectedMeal}
         onClose={() => setSelectedMeal(null)}
         onDelete={handleDeleteMeal}
+      />
+
+      {/* Visor de Cola de Procesamiento de IA */}
+      <QueueViewer
+        isOpen={isQueueOpen}
+        onClose={() => setIsQueueOpen(false)}
+        showFloatingBadge={true}
       />
     </div>
   );

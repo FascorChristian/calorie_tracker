@@ -11,6 +11,7 @@ import {
   getDailyNutritionalTotals,
 } from '../services/googleSheetsService.js';
 import { analyzeMealWithGemini } from '../services/geminiService.js';
+import { geminiQueueManager } from '../services/queueManager.js';
 import { uploadMealImageToDrive, deleteImageFromDrive } from '../services/googleDriveService.js';
 import { formatToMysqlDateTime, getTodayString, getSantiagoTimeString } from '../utils/dateUtils.js';
 import { Meal, DailySummary } from '../../shared/types.js';
@@ -84,8 +85,12 @@ export async function getMealStatusHandler(req: Request, res: Response) {
         });
       }
       if (cached.status === 'processing') {
+        const queueJob = geminiQueueManager.getJobByClientRequestId(clientRequestId);
         return res.json({
           status: 'processing',
+          queuePosition: queueJob?.position || 1,
+          queueStatus: queueJob?.statusMessage || 'Procesando en cola con Gemini 3.1 Flash Lite...',
+          model: queueJob?.model || 'gemini-3.1-flash-lite',
         });
       }
       if (cached.status === 'error') {
@@ -194,7 +199,7 @@ export async function analyzeMealHandler(req: Request, res: Response) {
     const runAnalysis = async (): Promise<AnalysisResult> => {
       const user = await getUser();
 
-      // Call Gemini 3.7 / 3.6 Flash multimodal
+      // Call Gemini 3.1 Flash Lite multimodal with queue manager
       const analysis = await analyzeMealWithGemini({
         imageBase64,
         imageMimeType,
@@ -204,6 +209,7 @@ export async function analyzeMealHandler(req: Request, res: Response) {
         mealType,
         user,
         notes,
+        clientRequestId,
       });
 
       // Subir foto a Google Drive si se incluyó una imagen
