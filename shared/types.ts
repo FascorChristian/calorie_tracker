@@ -70,6 +70,7 @@ export interface MultimodalAnalysisRequest {
   clientRequestId?: string;
   imageBase64?: string;
   imageMimeType?: string;
+  images?: Array<{ base64: string; mimeType: string }>;
   audioBase64?: string;
   audioMimeType?: string;
   audioTranscript?: string;
@@ -81,6 +82,7 @@ export interface MultimodalAnalysisRequest {
 }
 
 export interface GeminiMealAnalysisResponse {
+  mealType?: 'desayuno' | 'almuerzo' | 'cena' | 'snack';
   nombre_plato: string;
   calorias_estimadas: number;
   macros: {
@@ -93,6 +95,11 @@ export interface GeminiMealAnalysisResponse {
   feedback_breve: string;
   ingredientes_detectados: string[];
   detalles_audio: string;
+}
+
+export interface UnifiedMealAnalysisResponse {
+  comidas: GeminiMealAnalysisResponse[];
+  resumen_del_dia: GeminiDailyScoreResponse;
 }
 
 export interface GeminiDailyScoreResponse {

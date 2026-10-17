@@ -12,6 +12,7 @@ import {
   AlertCircle,
   Play,
   Clock,
+  Plus,
 } from 'lucide-react';
 import { Meal, UserProfile } from '../../../shared/types.js';
 
@@ -19,7 +20,8 @@ interface MultimodalMealModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: UserProfile | null;
-  onMealCreated: (newMeal: Meal) => void;
+  onMealCreated?: (newMeal: Meal) => void;
+  onMealsCreated?: (newMeals: Meal[], summary?: any) => void;
   currentDate?: string;
 }
 
@@ -86,20 +88,69 @@ function generateRequestId(): string {
   return 'req_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
 }
 
+/**
+ * Redimensiona y comprime una imagen a un tamaño máximo (1024px) y calidad JPEG 0.75
+ * para reducir fotos de 10-15MB a ~150-250KB, ahorrando ancho de banda y memoria RAM.
+ */
+function compressImage(source: File | string, maxDimension = 1024, quality = 0.75): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(typeof source === 'string' ? source : '');
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+      const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+      resolve(compressedDataUrl);
+    };
+
+    img.onerror = (err) => reject(err);
+
+    if (typeof source === 'string') {
+      img.src = source;
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(source);
+    }
+  });
+}
+
 export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   isOpen,
   onClose,
   user,
   onMealCreated,
+  onMealsCreated,
   currentDate,
 }) => {
-  // Mode: 'camera' | 'upload' | 'preview'
+  // Mode: Photos (Batch support)
   const [cameraActive, setCameraActive] = useState(false);
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [images, setImages] = useState<string[]>([]);
   const [mealType, setMealType] = useState<'desayuno' | 'almuerzo' | 'cena' | 'snack'>('almuerzo');
   const [mealTime, setMealTime] = useState<string>(getSantiagoCurrentTime());
   const [textNotes, setTextNotes] = useState('');
-  
+
   // Audio state
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -126,6 +177,7 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const isStartingAudioRef = useRef<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Idempotency & Mobile Screen-Lock Resilience Refs
   const clientRequestIdRef = useRef<string>(generateRequestId());
@@ -193,7 +245,13 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
               isAnalyzingRef.current = false;
               releaseWakeLock();
               clientRequestIdRef.current = generateRequestId();
-              onMealCreated(data.meal);
+              const mealsToReport: Meal[] =
+                data.meals && data.meals.length > 0 ? data.meals : [data.meal];
+              if (onMealsCreated) {
+                onMealsCreated(mealsToReport, data.summary);
+              } else if (onMealCreated) {
+                onMealCreated(data.meal);
+              }
               onClose();
             }
           }
@@ -207,7 +265,7 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [onMealCreated, onClose]);
+  }, [onMealCreated, onMealsCreated, onClose]);
 
   // Asegura que el elemento <audio> cargue inmediatamente el nuevo audio grabado
   useEffect(() => {
@@ -243,7 +301,7 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
   };
 
   const resetForm = () => {
-    setImageSrc(null);
+    setImages([]);
     discardAudio();
     setTextNotes('');
     setErrorMessage(null);
@@ -262,7 +320,11 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
           audio: false,
         });
       } catch {
@@ -275,7 +337,9 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
       setCameraActive(true);
     } catch (err: any) {
       console.error('Error starting camera:', err);
-      setErrorMessage('No se pudo acceder a la cámara. Puedes subir una foto desde tu dispositivo.');
+      setErrorMessage(
+        'No se pudo acceder a la cámara. Puedes subir una o más fotos desde tu galería.'
+      );
       setCameraActive(false);
     }
   };
@@ -287,54 +351,6 @@ export const MultimodalMealModal: React.FC<MultimodalMealModalProps> = ({
     }
     setCameraActive(false);
   };
-
-/**
- * Redimensiona y comprime una imagen a un tamaño máximo (1024px) y calidad JPEG 0.75
- * para reducir fotos de 10-15MB a ~150-250KB, ahorrando ancho de banda y memoria RAM.
- */
-function compressImage(source: File | string, maxDimension = 1024, quality = 0.75): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      let { width, height } = img;
-      if (width > maxDimension || height > maxDimension) {
-        if (width > height) {
-          height = Math.round((height * maxDimension) / width);
-          width = maxDimension;
-        } else {
-          width = Math.round((width * maxDimension) / height);
-          height = maxDimension;
-        }
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        resolve(typeof source === 'string' ? source : '');
-        return;
-      }
-
-      ctx.drawImage(img, 0, 0, width, height);
-      const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-      resolve(compressedDataUrl);
-    };
-
-    img.onerror = (err) => reject(err);
-
-    if (typeof source === 'string') {
-      img.src = source;
-    } else {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        img.src = e.target?.result as string;
-      };
-      reader.onerror = (err) => reject(err);
-      reader.readAsDataURL(source);
-    }
-  });
-}
 
   const capturePhoto = async () => {
     if (videoRef.current) {
@@ -349,30 +365,37 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
         stopCamera();
         try {
           const compressed = await compressImage(rawDataUrl, 1024, 0.75);
-          setImageSrc(compressed);
+          setImages((prev) => [...prev, compressed]);
         } catch {
-          setImageSrc(rawDataUrl);
+          setImages((prev) => [...prev, rawDataUrl]);
         }
       }
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+    const files = e.target.files;
+    if (files && files.length > 0) {
       stopCamera();
       try {
-        const compressed = await compressImage(file, 1024, 0.75);
-        setImageSrc(compressed);
+        const compressedList: string[] = [];
+        for (let i = 0; i < files.length; i++) {
+          const comp = await compressImage(files[i], 1024, 0.75);
+          compressedList.push(comp);
+        }
+        setImages((prev) => [...prev, ...compressedList]);
       } catch (err) {
         console.error('Error comprimiendo imagen:', err);
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setImageSrc(reader.result as string);
-        };
-        reader.readAsDataURL(file);
+      } finally {
+        if (e.target) {
+          e.target.value = '';
+        }
       }
     }
+  };
+
+  const removeImage = (indexToRemove: number) => {
+    setImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
   // ==========================================
@@ -432,7 +455,9 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
         mimeType = 'audio/ogg';
       }
 
-      const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
@@ -448,46 +473,27 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
 
         try {
           const arrayBuffer = await fullBlob.arrayBuffer();
-          const decodeCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          const audioBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
+          const decodeCtx = new AudioCtx();
+          const decodedAudio = await decodeCtx.decodeAudioData(arrayBuffer);
 
-          // Check amplitude across audio samples to warn if mic was muted in Windows
-          let maxAmp = 0;
-          const channelData = audioBuffer.getChannelData(0);
-          for (let i = 0; i < channelData.length; i++) {
-            const val = Math.abs(channelData[i]);
-            if (val > maxAmp) maxAmp = val;
-          }
+          const wavBlob = audioBufferToWav(decodedAudio);
+          decodeCtx.close().catch(() => {});
 
-          if (maxAmp < 0.008) {
-            setAudioWarning('El micrófono grabó casi en silencio. Revisa el volumen o activación de tu micrófono en Windows.');
-          } else {
-            setAudioWarning(null);
-          }
-
-          // Convert to standard 16-bit PCM WAV (universally playable in all browsers)
-          const wavBlob = audioBufferToWav(audioBuffer);
+          const wavUrl = URL.createObjectURL(wavBlob);
           setAudioBlob(wavBlob);
-          const u = URL.createObjectURL(wavBlob);
-          setAudioUrl(u);
+          setAudioUrl(wavUrl);
 
-          if (audioBuffer.duration && audioBuffer.duration > 0) {
-            setAudioDuration(Math.max(1, Math.round(audioBuffer.duration)));
-          }
-
-          // Convert to Base64 for Gemini & backend
           const reader = new FileReader();
           reader.onloadend = () => {
-            setAudioBase64(reader.result as string);
+            const b64 = reader.result as string;
+            setAudioBase64(b64);
           };
           reader.readAsDataURL(wavBlob);
-
-          decodeCtx.close().catch(() => {});
-        } catch (decodeErr) {
-          console.warn('Audio decoding fallback to raw blob:', decodeErr);
+        } catch (wavErr) {
+          console.warn('WAV conversion fallback:', wavErr);
+          const fallbackUrl = URL.createObjectURL(fullBlob);
           setAudioBlob(fullBlob);
-          const u = URL.createObjectURL(fullBlob);
-          setAudioUrl(u);
+          setAudioUrl(fallbackUrl);
 
           const reader = new FileReader();
           reader.onloadend = () => {
@@ -496,7 +502,6 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
           reader.readAsDataURL(fullBlob);
         }
 
-        // Stop media stream tracks
         stream.getTracks().forEach((track) => track.stop());
         if (audioCtx.state !== 'closed') {
           audioCtx.close().catch(() => {});
@@ -507,12 +512,10 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
         }
       };
 
-      // Start recording without timeslice so container isn't fragmented
       mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
       setIsRecording(true);
 
-      // Start duration counter safely
       const startTime = Date.now();
       timerRef.current = setInterval(() => {
         const elapsed = Math.max(1, Math.round((Date.now() - startTime) / 1000));
@@ -520,7 +523,9 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
       }, 500);
     } catch (err: any) {
       console.error('Error starting audio recording:', err);
-      setErrorMessage('No se pudo acceder al micrófono. Por favor verifica los permisos en el navegador.');
+      setErrorMessage(
+        'No se pudo acceder al micrófono. Por favor verifica los permisos en el navegador.'
+      );
       setIsRecording(false);
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -583,7 +588,9 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
         setIsPlayingAudio(true);
       } catch (retryErr) {
         console.error('Fallo al reproducir audio grabado:', retryErr);
-        setErrorMessage('No se pudo reproducir el audio. Verifica tu dispositivo de salida de sonido.');
+        setErrorMessage(
+          'No se pudo reproducir el audio. Verifica tu dispositivo de salida de sonido.'
+        );
         setIsPlayingAudio(false);
       }
     }
@@ -611,7 +618,6 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
 
       for (let i = 0; i < bufferLength; i++) {
         const barHeight = (dataArray[i] / 255) * canvas.height;
-        // Gradient color
         const gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
         gradient.addColorStop(0, '#10b981');
         gradient.addColorStop(1, '#2dd4bf');
@@ -630,14 +636,14 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
     reqId: string,
     maxAttempts = 15,
     intervalMs = 2000
-  ): Promise<Meal | null> => {
+  ): Promise<{ meal: Meal; meals?: Meal[]; summary?: any } | null> => {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const res = await fetch(`/api/meals/status/${reqId}`);
         if (res.ok) {
           const data = await res.json();
           if (data.status === 'completed' && data.meal) {
-            return data.meal;
+            return { meal: data.meal, meals: data.meals, summary: data.summary };
           }
           if (data.status === 'error') {
             throw new Error(data.error || 'Error al procesar la comida');
@@ -645,7 +651,9 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
           if (data.status === 'processing') {
             setAnalysisStep(
               data.queueStatus ||
-                `En cola de procesamiento IA (${data.queuePosition ? `Posición #${data.queuePosition}` : `${attempt * 2}s`})...`
+                `En cola de procesamiento IA (${
+                  data.queuePosition ? `Posición #${data.queuePosition}` : `${attempt * 2}s`
+                })...`
             );
           }
         }
@@ -666,8 +674,10 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
   };
 
   const handleAnalyzeAndSave = async () => {
-    if (!imageSrc && !audioBase64 && !textNotes.trim()) {
-      setErrorMessage('Por favor toma una foto, graba un audio o escribe la descripción del plato.');
+    if (images.length === 0 && !audioBase64 && !textNotes.trim()) {
+      setErrorMessage(
+        'Por favor toma una o más fotos, graba un audio o escribe la descripción del plato.'
+      );
       return;
     }
 
@@ -681,10 +691,10 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
     const currentRequestId = clientRequestIdRef.current;
 
     const steps = [
-      'Extrayendo datos de la imagen y nota de voz...',
-      'Inyectando contexto biométrico y metas...',
-      'Encolando y consultando Gemini 3.1 Flash Lite...',
-      'Calculando macros y puntaje del 1 al 10...',
+      'Extrayendo datos de imágenes y nota de voz...',
+      'Inyectando contexto biométrico y comidas previas del día...',
+      'Encolando llamada consolidada (Batch + Resumen 2-en-1)...',
+      'Calculando macros de cada plato y puntaje diario con Gemini...',
     ];
 
     let currentStepIdx = 0;
@@ -700,7 +710,8 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           clientRequestId: currentRequestId,
-          imageBase64: imageSrc || undefined,
+          images: images.map((img) => ({ base64: img, mimeType: 'image/jpeg' })),
+          imageBase64: images[0] || undefined,
           imageMimeType: 'image/jpeg',
           audioBase64: audioBase64 || undefined,
           audioMimeType: audioBlob?.type || 'audio/wav',
@@ -723,7 +734,13 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
       const data = await response.json();
       if (data.meal) {
         clientRequestIdRef.current = generateRequestId();
-        onMealCreated(data.meal);
+        const mealsToReport: Meal[] =
+          data.meals && data.meals.length > 0 ? data.meals : [data.meal];
+        if (onMealsCreated) {
+          onMealsCreated(mealsToReport, data.summary);
+        } else if (onMealCreated) {
+          onMealCreated(data.meal);
+        }
         onClose();
       }
     } catch (err: any) {
@@ -741,10 +758,18 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
       if (isNetworkOrScreenLockError) {
         setAnalysisStep('La pantalla se suspendió. Verificando procesamiento en segundo plano...');
         try {
-          const recoveredMeal = await pollForMealStatus(currentRequestId);
-          if (recoveredMeal) {
+          const recovered = await pollForMealStatus(currentRequestId);
+          if (recovered?.meal) {
             clientRequestIdRef.current = generateRequestId();
-            onMealCreated(recoveredMeal);
+            const mealsToReport: Meal[] =
+              recovered.meals && recovered.meals.length > 0
+                ? recovered.meals
+                : [recovered.meal];
+            if (onMealsCreated) {
+              onMealsCreated(mealsToReport, recovered.summary);
+            } else if (onMealCreated) {
+              onMealCreated(recovered.meal);
+            }
             onClose();
             return;
           }
@@ -755,7 +780,8 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
       }
 
       setErrorMessage(
-        err.message || 'Error al conectar con el servidor. Tus datos no se perdieron, puedes reintentar sin duplicar.'
+        err.message ||
+          'Error al conectar con el servidor. Tus datos no se perdieron, puedes reintentar sin duplicar.'
       );
     } finally {
       setIsAnalyzing(false);
@@ -780,7 +806,7 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
                 Registro Multimodal de Comida
               </h2>
               <p className="text-xs text-stone-400">
-                Foto + Nota de Voz descriptiva analizada con Gemini
+                Soporte Batch + Resumen Diario en una sola llamada a Gemini
               </p>
             </div>
           </div>
@@ -802,6 +828,15 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
               <span>{errorMessage}</span>
             </div>
           )}
+
+          {/* Helper tip: Batch & 2-in-1 prompt */}
+          <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs flex items-start gap-2.5">
+            <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+            <div className="leading-relaxed">
+              <span className="font-bold text-emerald-200">Llamada Consolidada (2-en-1):</span>{' '}
+              Puedes registrar uno o varios platos a la vez (múltiples fotos o descripción de varios alimentos). La IA identificará cada comida por separado y actualizará tu puntaje y resumen diario en una sola consulta.
+            </div>
+          </div>
 
           {/* Meal Type and Time Selection */}
           <div className="flex flex-col sm:flex-row gap-2.5">
@@ -837,40 +872,26 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
             </div>
           </div>
 
-          {/* Photo Capture Section */}
-          <div className="space-y-2">
+          {/* Photo Capture Section (Batch / Multiple Photos Support) */}
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between text-xs font-bold text-stone-300">
               <span className="flex items-center gap-1.5">
                 <Camera className="w-4 h-4 text-emerald-400" />
-                1. Foto del Plato
+                1. Fotos de los Platos ({images.length} {images.length === 1 ? 'foto' : 'fotos'})
               </span>
-              {imageSrc && (
+              {images.length > 0 && !cameraActive && (
                 <button
-                  onClick={() => {
-                    setImageSrc(null);
-                    stopCamera();
-                  }}
+                  type="button"
+                  onClick={() => setImages([])}
                   className="text-stone-400 hover:text-rose-400 text-[11px] font-normal"
                 >
-                  Cambiar foto
+                  Eliminar todas
                 </button>
               )}
             </div>
 
-            {/* Viewfinder / Preview / Upload Area */}
-            {imageSrc ? (
-              <div className="relative rounded-2xl overflow-hidden border border-stone-700 bg-stone-950 aspect-[4/3] sm:aspect-video flex items-center justify-center">
-                <img
-                  src={imageSrc}
-                  alt="Plato capturado"
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute bottom-3 left-3 bg-stone-950/80 backdrop-blur-md px-3 py-1 rounded-lg text-xs font-medium text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Imagen lista para Gemini
-                </div>
-              </div>
-            ) : cameraActive ? (
+            {/* Active Camera Viewfinder */}
+            {cameraActive ? (
               <div className="relative rounded-2xl overflow-hidden border border-emerald-500/40 bg-black aspect-[4/3] sm:aspect-video flex items-center justify-center">
                 <video
                   ref={(el) => {
@@ -892,7 +913,7 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
                   <button
                     type="button"
                     onClick={capturePhoto}
-                    className="w-14 h-14 rounded-full bg-white border-4 border-emerald-500 shadow-xl flex items-center justify-center transform active:scale-90 transition-transform"
+                    className="w-14 h-14 rounded-full bg-white border-4 border-emerald-500 shadow-xl flex items-center justify-center transform active:scale-90 transition-transform cursor-pointer"
                     title="Capturar foto"
                   >
                     <div className="w-10 h-10 rounded-full bg-emerald-500" />
@@ -900,41 +921,106 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
                   <button
                     type="button"
                     onClick={stopCamera}
-                    className="px-3 py-1.5 rounded-xl bg-stone-900/80 backdrop-blur-md text-xs text-stone-300 hover:text-white border border-stone-700"
+                    className="px-3.5 py-1.5 rounded-xl bg-stone-900/80 backdrop-blur-md text-xs text-stone-300 hover:text-white border border-stone-700 cursor-pointer"
                   >
                     Cancelar
                   </button>
                 </div>
               </div>
+            ) : images.length > 0 ? (
+              /* Gallery of Captured / Uploaded Images */
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {images.map((img, idx) => (
+                    <div
+                      key={idx}
+                      className="relative rounded-2xl overflow-hidden border border-stone-700 bg-stone-950 aspect-[4/3] group"
+                    >
+                      <img
+                        src={img}
+                        alt={`Plato ${idx + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                      <span className="absolute top-2 left-2 bg-stone-950/80 backdrop-blur-md px-2 py-0.5 rounded-md text-[10px] font-bold text-emerald-400 border border-emerald-500/30">
+                        #{idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeImage(idx)}
+                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-rose-950/80 text-rose-300 hover:bg-rose-600 hover:text-white transition-colors border border-rose-500/40"
+                        title="Eliminar esta foto"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Add more button tile in grid */}
+                  <div className="rounded-2xl border border-dashed border-stone-800 bg-stone-950/50 flex flex-col items-center justify-center p-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={startCamera}
+                      className="w-full py-1.5 px-2 bg-stone-900 hover:bg-stone-850 rounded-xl text-stone-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Cámara</span>
+                    </button>
+                    <label className="w-full py-1.5 px-2 bg-stone-900 hover:bg-stone-850 rounded-xl text-stone-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer text-center">
+                      <Upload className="w-3.5 h-3.5 text-teal-400" />
+                      <span>Galería</span>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-[11px] text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {images.length === 1
+                      ? '1 foto lista para Gemini 3.1 Flash Lite'
+                      : `${images.length} fotos listas para análisis en batch en una sola consulta`}
+                  </span>
+                </div>
+              </div>
             ) : (
+              /* No images selected yet: show options to take photo or upload (multiple) */
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Camera Button */}
                 <button
                   type="button"
                   onClick={startCamera}
-                  className="flex flex-col items-center justify-center gap-2 p-6 rounded-2xl bg-stone-950 hover:bg-stone-850 border border-stone-800 hover:border-emerald-500/50 transition-all group"
+                  className="flex flex-col items-center justify-center gap-2 p-6 rounded-2xl bg-stone-950 hover:bg-stone-850 border border-stone-800 hover:border-emerald-500/50 transition-all group cursor-pointer"
                 >
                   <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
                     <Camera className="w-6 h-6" />
                   </div>
                   <span className="text-xs font-bold text-stone-200">Tomar Foto con Cámara</span>
                   <span className="text-[11px] text-stone-500 text-center">
-                    Apunta a tu plato para detección visual
+                    Apunta a tus platos para detección visual
                   </span>
                 </button>
 
-                {/* Upload File Input */}
+                {/* Upload File Input (Supports multiple selection) */}
                 <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-2xl bg-stone-950 hover:bg-stone-850 border border-stone-800 hover:border-teal-500/50 cursor-pointer transition-all group">
                   <div className="w-12 h-12 rounded-2xl bg-teal-500/10 text-teal-400 flex items-center justify-center group-hover:scale-110 transition-transform">
                     <Upload className="w-6 h-6" />
                   </div>
-                  <span className="text-xs font-bold text-stone-200">Subir Imagen</span>
+                  <span className="text-xs font-bold text-stone-200">Subir Imágenes (Batch)</span>
                   <span className="text-[11px] text-stone-500 text-center">
-                    PNG, JPG o WEBP desde galería
+                    Selecciona 1 o varias fotos desde la galería
                   </span>
                   <input
+                    ref={fileInputRef}
                     type="file"
                     accept="image/*"
+                    multiple
                     onChange={handleFileUpload}
                     className="hidden"
                   />
@@ -1005,7 +1091,6 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
                 {/* Recorded Audio Controls */}
                 {audioBlob && !isRecording && (
                   <div className="flex items-center gap-2 w-full sm:w-auto bg-stone-900 p-2 rounded-xl border border-stone-800">
-                    {/* Direct Hardware Web Audio API Playback Button */}
                     <button
                       type="button"
                       onClick={playAudio}
@@ -1029,7 +1114,6 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
                       )}
                     </button>
 
-                    {/* Native Audio Tag with Scrubber */}
                     <audio
                       ref={audioElementRef}
                       src={audioUrl || audioBase64 || undefined}
@@ -1052,7 +1136,6 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
                 )}
               </div>
 
-              {/* Warning if microphone recorded silence */}
               {audioWarning && (
                 <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
@@ -1064,13 +1147,13 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
             {/* Notas Adicionales */}
             <div className="pt-2">
               <label className="text-xs font-bold text-stone-300 block mb-1.5">
-                Notas adicionales:
+                Notas adicionales (o descripción de varios platos):
               </label>
               <textarea
                 rows={3}
                 value={textNotes}
                 onChange={(e) => setTextNotes(e.target.value)}
-                placeholder="Escribe notas adicionales sobre tu comida (ingredientes, salsas, porciones, etc.)..."
+                placeholder="Describe tus platos o ingredientes ocultos (ej: 'Pollo con arroz y de postre una manzana con yogurt griego')..."
                 className="w-full px-3.5 py-2.5 rounded-xl bg-stone-900 border border-stone-800 text-stone-200 text-xs focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
               />
             </div>
@@ -1083,7 +1166,7 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
             type="button"
             onClick={onClose}
             disabled={isAnalyzing}
-            className="px-4 py-2.5 rounded-xl border border-stone-700 hover:bg-stone-850 text-stone-300 text-xs font-semibold transition-colors"
+            className="px-4 py-2.5 rounded-xl border border-stone-700 hover:bg-stone-850 text-stone-300 text-xs font-semibold transition-colors cursor-pointer"
           >
             Cancelar
           </button>
@@ -1091,8 +1174,8 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
           <button
             type="button"
             onClick={handleAnalyzeAndSave}
-            disabled={isAnalyzing || (!imageSrc && !audioBase64 && !textNotes.trim())}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-stone-950 font-bold text-xs hover:from-emerald-400 hover:to-teal-400 transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isAnalyzing || (images.length === 0 && !audioBase64 && !textNotes.trim())}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-stone-950 font-bold text-xs hover:from-emerald-400 hover:to-teal-400 transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {isAnalyzing ? (
               <>
@@ -1102,7 +1185,11 @@ function compressImage(source: File | string, maxDimension = 1024, quality = 0.7
             ) : (
               <>
                 <Sparkles className="w-4 h-4" />
-                <span>Analizar y Registrar Plato</span>
+                <span>
+                  {images.length > 1
+                    ? `Analizar y Registrar ${images.length} Platos (Batch)`
+                    : 'Analizar y Registrar Plato'}
+                </span>
               </>
             )}
           </button>

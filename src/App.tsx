@@ -127,10 +127,25 @@ export default function App() {
     }
   };
 
-  const handleMealCreated = (newMeal: Meal) => {
-    setMeals((prev) => [newMeal, ...prev]);
-    fetchDayData(currentDate);
-    showToast(`¡${newMeal.nombre_plato} registrado y analizado con éxito!`);
+  const handleMealsCreated = (newMeals: Meal[], summary?: DailySummary | null) => {
+    setMeals((prev) => {
+      const existingIds = new Set(newMeals.map((m) => m.id));
+      return [...newMeals, ...prev.filter((m) => !existingIds.has(m.id))];
+    });
+    if (summary) {
+      setDailySummary(summary);
+    } else {
+      fetchDayData(currentDate);
+    }
+    if (newMeals.length > 1) {
+      showToast(`¡${newMeals.length} platos registrados y evaluados juntos con éxito!`);
+    } else if (newMeals.length === 1) {
+      showToast(`¡${newMeals[0].nombre_plato} registrado y analizado con éxito!`);
+    }
+  };
+
+  const handleMealCreated = (newMeal: Meal, summary?: DailySummary | null) => {
+    handleMealsCreated([newMeal], summary);
   };
 
   const handleDeleteMeal = async (mealId: string) => {
@@ -243,6 +258,7 @@ export default function App() {
         onClose={() => setIsNewMealOpen(false)}
         user={user}
         onMealCreated={handleMealCreated}
+        onMealsCreated={handleMealsCreated}
         currentDate={currentDate}
       />
 

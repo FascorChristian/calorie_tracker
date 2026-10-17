@@ -68,7 +68,7 @@ export const api = {
    */
   async analyzeMeal(
     data: MultimodalAnalysisRequest
-  ): Promise<{ success: boolean; meal: Meal; summary: DailySummary }> {
+  ): Promise<{ success: boolean; meal: Meal; meals?: Meal[]; summary: DailySummary }> {
     const res = await fetch('/api/meals/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
